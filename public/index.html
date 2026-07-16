@@ -139,12 +139,14 @@
                   <button id="domFileButton" class="icon-button source-button" type="button" title="选择并上传 DOM TIFF 文件">
                     <span aria-hidden="true">▧</span><b>选择 TIFF</b>
                   </button>
-                  <button id="domFolderButton" class="icon-button source-button" type="button" title="从文件夹中选择并上传 DOM TIFF">
-                    <span aria-hidden="true">▱</span><b>选择文件夹</b>
-                  </button>
                   <button id="onlineButton" class="icon-button source-button" type="button" title="加载在线卫星瓦片">
                     <span aria-hidden="true">◎</span><b>在线影像</b>
                   </button>
+                  <div class="map-zoom-control source-zoom" role="group" aria-label="DOM 缩放控制">
+                    <button id="domZoomOutButton" type="button" title="缩小 DOM" aria-label="缩小 DOM">−</button>
+                    <button id="domNativeButton" class="zoom-value" type="button" title="DOM 原始分辨率 1:1"><span id="domZoomValue">100%</span></button>
+                    <button id="domZoomInButton" type="button" title="放大 DOM" aria-label="放大 DOM">+</button>
+                  </div>
                 </div>
                 <div class="map-toolbar-row map-toolbar-row-actions">
                   <span class="toolbar-label">地图操作</span>
@@ -154,11 +156,9 @@
                   <button id="polygonButton" class="icon-button action-button" type="button" title="多边形框选区域，双击闭合">
                     <span aria-hidden="true">⬡</span><b>多边形</b>
                   </button>
-                  <div class="map-zoom-control" role="group" aria-label="DOM 缩放控制">
-                    <button id="domZoomOutButton" type="button" title="缩小 DOM" aria-label="缩小 DOM">−</button>
-                    <button id="domNativeButton" class="zoom-value" type="button" title="DOM 原始分辨率 1:1"><span id="domZoomValue">100%</span></button>
-                    <button id="domZoomInButton" type="button" title="放大 DOM" aria-label="放大 DOM">+</button>
-                  </div>
+                  <button id="domLocateButton" class="icon-button action-button" type="button" title="回到最新定位位置">
+                    <span aria-hidden="true">⌾</span><b>当前位置</b>
+                  </button>
                   <button id="fitButton" class="icon-button action-button compact-command" type="button" title="适配完整 DOM 影像">
                     <span aria-hidden="true">⌗</span><b>全图</b>
                   </button>
@@ -167,7 +167,6 @@
                   </button>
                 </div>
                 <input id="domFileInput" type="file" accept=".tif,.tiff,.geotiff" hidden />
-                <input id="domFolderInput" type="file" accept=".tif,.tiff,.geotiff" webkitdirectory directory multiple hidden />
               </div>
               <div class="map-badge" aria-hidden="true"><span>WGS 84</span><b>DOM / LIVE</b></div>
               <div id="mapViewport" class="map-viewport">
@@ -197,17 +196,17 @@
                   <button id="dsmFileButton" class="icon-button source-button" type="button" title="选择并上传 DSM TIFF 文件">
                     <span aria-hidden="true">△</span><b>选择 TIFF</b>
                   </button>
-                  <button id="dsmFolderButton" class="icon-button source-button" type="button" title="从文件夹中选择并上传 DSM TIFF">
-                    <span aria-hidden="true">▱</span><b>选择文件夹</b>
-                  </button>
-                </div>
-                <div class="map-toolbar-row map-toolbar-row-actions">
-                  <span class="toolbar-label">地图操作</span>
-                  <div class="map-zoom-control" role="group" aria-label="DSM 缩放控制">
+                  <div class="map-zoom-control source-zoom" role="group" aria-label="DSM 缩放控制">
                     <button id="dsmZoomOutButton" type="button" title="缩小 DSM" aria-label="缩小 DSM">−</button>
                     <button id="dsmNativeButton" class="zoom-value" type="button" title="DSM 原始分辨率 1:1"><span id="dsmZoomValue">100%</span></button>
                     <button id="dsmZoomInButton" type="button" title="放大 DSM" aria-label="放大 DSM">+</button>
                   </div>
+                </div>
+                <div class="map-toolbar-row map-toolbar-row-actions">
+                  <span class="toolbar-label">地图操作</span>
+                  <button id="dsmLocateButton" class="icon-button action-button" type="button" title="回到最新定位位置">
+                    <span aria-hidden="true">⌾</span><b>当前位置</b>
+                  </button>
                   <button id="dsmFitButton" class="icon-button action-button compact-command" type="button" title="适配完整 DSM 影像">
                     <span aria-hidden="true">⌗</span><b>全图</b>
                   </button>
@@ -219,7 +218,6 @@
                   </div>
                 </div>
                 <input id="dsmFileInput" type="file" accept=".tif,.tiff,.geotiff" hidden />
-                <input id="dsmFolderInput" type="file" accept=".tif,.tiff,.geotiff" webkitdirectory directory multiple hidden />
               </div>
               <div class="map-badge dsm-badge" aria-hidden="true"><span>WGS 84</span><b>DSM / ELEVATION</b></div>
               <div id="dsmViewport" class="map-viewport dsm-viewport">

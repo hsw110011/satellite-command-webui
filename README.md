@@ -300,6 +300,4 @@ satellite-command-webui/
 
 **Q: 地图加载白屏？**
 - 在线模式需要网络连接
-- 离线环境使用本地瓦片文件夹或单张正射影像
-# satellite-command-webui
-# satellite-command-webui
+- 离线环境点击“选择 TIFF”加载本地 GeoTIFF 文件

@@ -4,15 +4,15 @@ const elements = {
   backendState: $("#backendState"), gatewayState: $("#gatewayState"), rosState: $("#rosState"),
   mapState: $("#mapState"), locState: $("#locState"), publishState: $("#publishState"),
   bridgeMode: $("#bridgeMode"), systemClock: $("#systemClock"),
-  domFileButton: $("#domFileButton"), domFolderButton: $("#domFolderButton"), onlineButton: $("#onlineButton"),
+  domFileButton: $("#domFileButton"), onlineButton: $("#onlineButton"), domLocateButton: $("#domLocateButton"),
   rectButton: $("#rectButton"), polygonButton: $("#polygonButton"), fitButton: $("#fitButton"),
   domZoomOutButton: $("#domZoomOutButton"), domNativeButton: $("#domNativeButton"), domZoomInButton: $("#domZoomInButton"),
   domZoomValue: $("#domZoomValue"), domExpandButton: $("#domExpandButton"),
-  domFileInput: $("#domFileInput"), domFolderInput: $("#domFolderInput"),
-  dsmFileButton: $("#dsmFileButton"), dsmFolderButton: $("#dsmFolderButton"), dsmFitButton: $("#dsmFitButton"),
+  domFileInput: $("#domFileInput"),
+  dsmFileButton: $("#dsmFileButton"), dsmFitButton: $("#dsmFitButton"), dsmLocateButton: $("#dsmLocateButton"),
   dsmZoomOutButton: $("#dsmZoomOutButton"), dsmNativeButton: $("#dsmNativeButton"), dsmZoomInButton: $("#dsmZoomInButton"),
   dsmZoomValue: $("#dsmZoomValue"), dsmExpandButton: $("#dsmExpandButton"),
-  dsmFileInput: $("#dsmFileInput"), dsmFolderInput: $("#dsmFolderInput"),
+  dsmFileInput: $("#dsmFileInput"),
   mapWorkspace: $(".dual-map-workspace"),
   mapViewport: $("#mapViewport"), mapContent: $("#mapContent"), vectorLayer: $("#vectorLayer"),
   dsmViewport: $("#dsmViewport"), dsmContent: $("#dsmContent"), dsmVectorLayer: $("#dsmVectorLayer"),
@@ -115,14 +115,12 @@ function init() {
 
 function bindEvents() {
   on(elements.domFileButton, "click", () => elements.domFileInput?.click());
-  on(elements.domFolderButton, "click", () => elements.domFolderInput?.click());
   on(elements.dsmFileButton, "click", () => elements.dsmFileInput?.click());
-  on(elements.dsmFolderButton, "click", () => elements.dsmFolderInput?.click());
-  on(elements.domFileInput, "change", (event) => handleTiffSelection("dom", event, false));
-  on(elements.domFolderInput, "change", (event) => handleTiffSelection("dom", event, true));
-  on(elements.dsmFileInput, "change", (event) => handleTiffSelection("dsm", event, false));
-  on(elements.dsmFolderInput, "change", (event) => handleTiffSelection("dsm", event, true));
+  on(elements.domFileInput, "change", (event) => handleTiffSelection("dom", event));
+  on(elements.dsmFileInput, "change", (event) => handleTiffSelection("dsm", event));
   on(elements.onlineButton, "click", renderOnlineTiles);
+  on(elements.domLocateButton, "click", () => centerOnLatestPosition("dom"));
+  on(elements.dsmLocateButton, "click", () => centerOnLatestPosition("dsm"));
   on(elements.fitButton, "click", () => fitView("dom"));
   on(elements.dsmFitButton, "click", () => fitView("dsm"));
   on(elements.domZoomOutButton, "click", () => zoomBy("dom", 0.8));
@@ -225,27 +223,20 @@ function fileDisplayName(file) {
   return file.webkitRelativePath || file.name;
 }
 
-async function handleTiffSelection(kind, event, fromFolder) {
+async function handleTiffSelection(kind, event) {
   const input = event.currentTarget;
   const files = Array.from(input?.files || []).filter(isTiffFile);
   input.value = "";
   const label = labelForMap(kind);
 
   if (!files.length) {
-    setUploadStatus(kind, fromFolder ? "所选文件夹中没有 TIFF" : "未选择 TIFF", true);
-    addLog(`${label}: ${fromFolder ? "文件夹中未找到" : "未选择"} TIFF`);
+    setUploadStatus(kind, "未选择 TIFF", true);
+    addLog(`${label}: 未选择 TIFF`);
     return;
   }
 
-  files.sort((a, b) => fileDisplayName(a).localeCompare(fileDisplayName(b), "zh-CN", { numeric: true }));
   const selected = files[0];
-  if (files.length > 1) {
-    const rule = `检测到 ${files.length} 个 TIFF，按路径自然排序选择第一个: ${fileDisplayName(selected)}`;
-    setUploadStatus(kind, rule);
-    addLog(`${label}: ${rule}`);
-  } else {
-    setUploadStatus(kind, `已选择 ${fileDisplayName(selected)}`);
-  }
+  setUploadStatus(kind, `已选择 ${fileDisplayName(selected)}`);
   await uploadGeoTiff(kind, selected);
 }
 
@@ -287,10 +278,8 @@ async function uploadGeoTiff(kind, file) {
 }
 
 function setUploadControlsDisabled(kind, disabled) {
-  const buttons = kind === "dsm"
-    ? [elements.dsmFileButton, elements.dsmFolderButton]
-    : [elements.domFileButton, elements.domFolderButton];
-  buttons.forEach((button) => { if (button) button.disabled = disabled; });
+  const button = kind === "dsm" ? elements.dsmFileButton : elements.domFileButton;
+  if (button) button.disabled = disabled;
 }
 
 function setUploadStatus(kind, message, isError = false) {
@@ -793,6 +782,44 @@ function zoomBy(kind, factor) {
 function setNativeScale(kind) {
   setScaleAtPoint(kind, 1);
   addLog(`${labelForMap(kind)} 切换到 1:1 原始分辨率`);
+}
+
+async function centerOnLatestPosition(kind) {
+  const lat = toFiniteNumber(state.latestTelemetry?.lat);
+  const lon = toFiniteNumber(state.latestTelemetry?.lon);
+  const { source, view, viewport } = mapParts(kind);
+  const label = labelForMap(kind);
+  if (lat === null || lon === null) {
+    setUploadStatus(kind, "暂无有效定位数据", true);
+    addLog(`${label} 回正失败: 暂无有效定位数据`);
+    return;
+  }
+  if (!source.loaded) {
+    setUploadStatus(kind, `${label} 地图尚未加载`, true);
+    return;
+  }
+
+  try {
+    const [point] = isGeoTiffSource(source)
+      ? await requestCoordinateBatch(kind, "wgs84_to_pixel", [{ lat, lon }], source.fingerprint)
+      : [latLonToContentForSource(source, lat, lon)];
+    const x = toFiniteNumber(point?.x);
+    const y = toFiniteNumber(point?.y);
+    if (x === null || y === null) throw new Error("定位坐标转换失败");
+    if (x < 0 || y < 0 || x > source.width || y > source.height) {
+      throw new Error("当前位置不在地图范围内");
+    }
+    const rect = viewport?.getBoundingClientRect();
+    if (!rect?.width || !rect.height) throw new Error("地图视口不可用");
+    view.x = rect.width / 2 - x * view.scale;
+    view.y = rect.height / 2 - y * view.scale;
+    applyTransform(kind);
+    setUploadStatus(kind, `当前位置 · ${lat.toFixed(6)}, ${lon.toFixed(6)}`);
+    addLog(`${label} 已回到当前位置`);
+  } catch (error) {
+    setUploadStatus(kind, `回正失败 · ${error.message}`, true);
+    addLog(`${label} 回正失败: ${error.message}`);
+  }
 }
 
 function mapContentCenter(kind) {

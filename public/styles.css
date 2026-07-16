@@ -505,6 +505,11 @@ textarea:focus-visible {
   white-space: nowrap;
 }
 
+.source-zoom {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
 .compact-command {
   padding-right: 7px;
   padding-left: 7px;
