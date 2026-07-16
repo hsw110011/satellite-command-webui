@@ -151,7 +151,7 @@ chmod +x scripts/skyforge-launcher.sh scripts/install-ubuntu-launcher.sh
 2. 检测 ROS Noetic 和 Python 依赖
 3. 启动 FastAPI Gateway
 4. 等待后端就绪
-5. 使用 Chromium/Chrome `--app` 模式打开无地址栏独立窗口
+5. 使用 Chromium/Chrome `--app` <!-- 模式打开无地址栏独立窗口 -->
 
 也可以从终端启动：
 

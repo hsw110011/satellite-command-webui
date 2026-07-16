@@ -1,1 +1,26 @@
-[]
+[
+  {
+    "id": "region-1784229022437",
+    "name": "AREA-001",
+    "shape": "rectangle",
+    "sourceType": "geotiff-dom",
+    "mapFingerprint": "1f1e2efca0ed153971094f3b3b7e1a06fb4294bfb2c97d6e7c9ec325d7aefe48",
+    "createdAt": "2026-07-16T19:10:22.437Z",
+    "pixelBox": {
+      "x": 8328.6,
+      "y": 11594.66,
+      "width": 3227.44,
+      "height": 1672.05
+    },
+    "bbox": {
+      "topLeft": {
+        "lat": 28.6664299,
+        "lon": 113.0570749
+      },
+      "bottomRight": {
+        "lat": 28.6659999,
+        "lon": 113.0580159
+      }
+    }
+  }
+]
