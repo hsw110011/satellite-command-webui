@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>多源融合定位地图交互界面</title>
+    <meta name="theme-color" content="#081018" />
+    <link rel="icon" href="./skyforge.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3.1" />
+              <ellipse cx="12" cy="12" rx="9.4" ry="4" transform="rotate(-28 12 12)" />
+              <circle cx="20" cy="8.7" r="1.25" fill="currentColor" stroke="none" />
+            </svg>
+          </span>
+          <div class="brand-text">
+            <div class="brand-line">
+              <strong>多源融合定位</strong>
+              <span id="bridgeMode" class="brand-mode">DEMO</span>
+            </div>
+            <small>ORBITAL LOCALIZATION CONSOLE</small>
+          </div>
+        </div>
+
+        <div class="command-center" aria-hidden="true">
+          <span class="frame-tag">FRAME</span>
+          <span class="frame-val">WGS 84 · UTM 50N</span>
+          <span class="frame-sep"></span>
+          <span class="frame-tag">SESSION</span>
+          <span class="frame-val">MSN-0427</span>
+        </div>
+
+        <div class="topbar-meta">
+          <div class="status-strip">
+            <div><span id="backendState" class="status-dot muted"></span>API</div>
+            <div><span id="gatewayState" class="status-dot muted"></span>GW</div>
+            <div><span id="rosState" class="status-dot muted"></span>ROS</div>
+            <div><span id="mapState" class="status-dot muted"></span>MAP</div>
+            <div><span id="locState" class="status-dot muted"></span>LOC</div>
+            <div><span id="publishState" class="status-dot muted"></span>PUB</div>
+          </div>
+          <time id="systemClock" class="system-clock">--:--:--</time>
+        </div>
+      </header>
+
+      <div class="workspace">
+        <nav class="rail" aria-label="控制台模块">
+          <button class="rail-item active" type="button" title="任务总览" aria-label="任务总览" data-view="overview">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="3" />
+              <ellipse cx="12" cy="12" rx="9" ry="3.8" transform="rotate(-30 12 12)" />
+              <circle cx="19.4" cy="8.9" r="1.1" fill="currentColor" stroke="none" />
+            </svg>
+          </button>
+          <button class="rail-item" type="button" title="地理围栏" aria-label="地理围栏" data-view="regions">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 4 4 8l8 4 8-4-8-4Z" />
+              <path d="M4 12l8 4 8-4" />
+              <path d="M4 16l8 4 8-4" opacity="0.55" />
+            </svg>
+          </button>
+          <button class="rail-item" type="button" title="定位观测" aria-label="定位观测" data-view="localization">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="5.4" />
+              <path d="M12 2.4v3.1M12 18.5v3.1M2.4 12h3.1M18.5 12h3.1" />
+              <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" />
+            </svg>
+          </button>
+          <button class="rail-item" type="button" title="智能协同" aria-label="智能协同" data-view="agent">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3.2" y="4" width="6" height="5" rx="1" />
+              <rect x="14.8" y="4" width="6" height="5" rx="1" />
+              <rect x="9" y="15" width="6" height="5" rx="1" />
+              <path d="M6.2 9v2.6h11.6V9M12 11.6V15" />
+            </svg>
+          </button>
+          <span class="rail-spacer"></span>
+          <button class="rail-item" type="button" title="终端" aria-label="终端" data-view="log">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="3.2" y="4.5" width="17.6" height="15" rx="2" />
+              <path d="M7 9.5l3 2.5-3 2.5M13 15h4" />
+            </svg>
+          </button>
+        </nav>
+
+        <main class="main-column">
+          <section class="map-panel" aria-label="卫星地图">
+            <div class="map-toolbar" role="toolbar" aria-label="地图工具">
+              <button id="folderButton" class="icon-button" title="读取卫星地图文件夹">
+                <span aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 4.5 4.5 8 12 11.5 19.5 8 12 4.5Z" />
+                    <path d="M4.5 12 12 15.5 19.5 12" />
+                  </svg>
+                </span>
+                <b>地图文件夹</b>
+              </button>
+              <button id="onlineButton" class="icon-button" title="加载在线卫星瓦片">
+                <span aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="8.3" />
+                    <path d="M3.7 12h16.6M12 3.7c2.4 2.3 2.4 14.3 0 16.6M12 3.7c-2.4 2.3-2.4 14.3 0 16.6" />
+                  </svg>
+                </span>
+                <b>在线影像</b>
+              </button>
+              <button id="rectButton" class="icon-button" title="矩形框选区域">
+                <span aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="5" y="6.5" width="14" height="11" rx="1" stroke-dasharray="3.4 2.6" />
+                    <circle cx="5" cy="6.5" r="1.3" fill="currentColor" stroke="none" />
+                    <circle cx="19" cy="17.5" r="1.3" fill="currentColor" stroke="none" />
+                  </svg>
+                </span>
+                <b>矩形</b>
+              </button>
+              <button id="polygonButton" class="icon-button" title="多边形框选区域，双击闭合">
+                <span aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 4 20 9.6 17 19H7L4 9.6 12 4Z" />
+                    <circle cx="12" cy="4" r="1.25" fill="currentColor" stroke="none" />
+                    <circle cx="20" cy="9.6" r="1.25" fill="currentColor" stroke="none" />
+                    <circle cx="4" cy="9.6" r="1.25" fill="currentColor" stroke="none" />
+                  </svg>
+                </span>
+                <b>多边形</b>
+              </button>
+              <button id="fitButton" class="icon-button" title="适配视图">
+                <span aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M4 8.5V6a2 2 0 0 1 2-2h2.5M20 8.5V6a2 2 0 0 0-2-2h-2.5M4 15.5V18a2 2 0 0 0 2 2h2.5M20 15.5V18a2 2 0 0 1-2 2h-2.5" />
+                  </svg>
+                </span>
+                <b>适配</b>
+              </button>
+              <input id="folderInput" type="file" webkitdirectory directory multiple hidden />
+            </div>
+
+            <div class="map-badge" aria-hidden="true">
+              <span>WGS 84</span>
+              <b>SPATIAL VIEW · LIVE</b>
+            </div>
+
+            <div id="mapViewport" class="map-viewport">
+              <div id="mapContent" class="map-content">
+                <svg id="vectorLayer" class="vector-layer" xmlns="http://www.w3.org/2000/svg"></svg>
+              </div>
+              <div class="reticle horizontal" aria-hidden="true"></div>
+              <div class="reticle vertical" aria-hidden="true"></div>
+              <div class="viewport-frame" aria-hidden="true">
+                <i class="corner tl"></i>
+                <i class="corner tr"></i>
+                <i class="corner bl"></i>
+                <i class="corner br"></i>
+              </div>
+              <div class="compass" aria-hidden="true">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 3.5 15 12l-3-1.8L9 12l3-8.5Z" fill="currentColor" stroke="none" />
+                  <circle cx="12" cy="12.6" r="8" opacity="0.5" />
+                </svg>
+                <span>N</span>
+              </div>
+              <div class="scale-bar" aria-hidden="true">
+                <i></i>
+                <span>500 m</span>
+              </div>
+              <div id="drawHint" class="draw-hint" hidden>左键添加顶点 · 双击闭合 · 右键撤销</div>
+              <div id="cursorReadout" class="cursor-readout">--</div>
+            </div>
+          </section>
+
+          <section class="viz-panel" aria-label="定位可视化">
+            <div class="viz-block">
+              <div class="panel-title">
+                <span>2D 轨迹</span>
+                <small id="trajInfo">等待定位数据</small>
+              </div>
+              <div class="canvas-wrap">
+                <canvas id="trajectoryCanvas"></canvas>
+              </div>
+            </div>
+            <div class="viz-block">
+              <div class="panel-title">
+                <span>数据曲线</span>
+                <div class="legend" id="curveLegend"></div>
+              </div>
+              <div class="canvas-wrap">
+                <canvas id="curveCanvas"></canvas>
+              </div>
+            </div>
+          </section>
+        </main>
+
+        <aside class="side-panel" aria-label="检视面板">
+          <section class="program-panel" data-view="overview">
+            <div class="panel-title">
+              <span>定位程序</span>
+              <small id="locProgramState" class="state-label">STOPPED</small>
+            </div>
+            <p class="program-description">独立管理 ROS1 定位 launch；启动、状态监测与区域发布互不耦合。</p>
+            <div class="program-health">
+              <div>
+                <span>ROS MASTER</span>
+                <b id="rosMasterValue">检查中</b>
+              </div>
+              <div>
+                <span>GATEWAY NODE</span>
+                <b id="rosNodeValue">--</b>
+              </div>
+              <div>
+                <span>MESSAGE TYPE</span>
+                <b id="messageTypeValue">--</b>
+              </div>
+              <div>
+                <span>LAUNCH PROFILE</span>
+                <b id="launchConfigValue">--</b>
+              </div>
+              <div class="process-health">
+                <span>PROCESS</span>
+                <b id="processValue">0 process</b>
+              </div>
+            </div>
+            <div id="localizationError" class="program-alert" hidden></div>
+            <div class="program-actions">
+              <button id="startLocButton" class="accent-button" title="启动整个定位程序">启动定位程序</button>
+            </div>
+          </section>
+
+          <section class="control-panel" data-view="regions">
+            <div class="panel-title">
+              <span>区域发布</span>
+              <small id="publishStatus">IDLE</small>
+            </div>
+            <div class="control-grid">
+              <label>
+                <span>标识位</span>
+                <select id="flagSelect">
+                  <option value="GPS_FLAG">GPS_FLAG</option>
+                  <option value="DR_FLAG">DR_FLAG</option>
+                  <option value="MATCH_FLAG">MATCH_FLAG</option>
+                </select>
+              </label>
+              <label>
+                <span>区域</span>
+                <div class="region-picker">
+                  <select id="regionSelect">
+                    <option value="">未选择</option>
+                  </select>
+                  <button id="deleteRegionButton" class="danger-button" type="button" title="删除选中区域" disabled>删除</button>
+                </div>
+              </label>
+              <label class="topic-field">
+                <span>发布话题名称（可自定义）</span>
+                <input id="topicInput" value="/selected_region" placeholder="例如 /selected_region" spellcheck="false" />
+              </label>
+            </div>
+            <p class="field-help">统一消息结构：<code>{ flag, region }</code>。切换标识位不会修改话题名称。</p>
+            <div class="control-actions">
+              <button id="publishButton" class="primary-button" title="持续发布选中区域">发布</button>
+              <button id="stopButton" class="ghost-button" title="停止发布">停止</button>
+            </div>
+            <div class="region-readout">
+              <span>当前区域</span>
+              <pre id="regionReadout">未选择</pre>
+            </div>
+          </section>
+
+          <section class="agent-panel" data-view="agent">
+            <div class="panel-title">
+              <span class="agent-heading">
+                <span class="robot-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="4.2" width="5.6" height="4.6" rx="1" />
+                    <rect x="15.4" y="4.2" width="5.6" height="4.6" rx="1" />
+                    <rect x="9.2" y="15" width="5.6" height="4.6" rx="1" />
+                    <path d="M5.8 8.8v2.4h12.4V8.8M12 11.2V15" />
+                  </svg>
+                </span>
+                Agent / VLM
+              </span>
+              <small id="agentMode">LangGraph bridge</small>
+            </div>
+            <label class="compact-field">
+              <span>Graph URL</span>
+              <input id="graphEndpoint" placeholder="http://127.0.0.1:8000/invoke" />
+            </label>
+            <textarea
+              id="agentPrompt"
+              spellcheck="false"
+              placeholder="输入给 Agent 或 VLM 的任务..."
+            >分析当前框选区域，结合定位数据给出巡检建议。</textarea>
+            <div class="agent-row">
+              <select id="agentType">
+                <option value="agent">Agent</option>
+                <option value="vlm">VLM</option>
+              </select>
+              <button id="runAgentButton" class="primary-button">运行</button>
+            </div>
+            <pre id="agentOutput" class="agent-output">READY</pre>
+          </section>
+
+          <section class="monitor-panel" data-view="localization">
+            <div class="panel-title">
+              <span>定位 / 数据</span>
+              <small id="topicName">/localization/fix</small>
+            </div>
+            <div class="telemetry-grid">
+              <div><span>LAT</span><b id="latValue">--</b></div>
+              <div><span>LON</span><b id="lonValue">--</b></div>
+              <div><span>ALT</span><b id="altValue">--</b></div>
+              <div><span>HDG</span><b id="headingValue">--</b></div>
+              <div><span>SPD</span><b id="speedValue">--</b></div>
+              <div><span>SRC</span><b id="sourceValue">--</b></div>
+            </div>
+          </section>
+
+          <section class="log-panel" data-view="log">
+            <div class="panel-title">
+              <span>Mission Log</span>
+              <small>live</small>
+            </div>
+            <ol id="eventLog"></ol>
+          </section>
+        </aside>
+      </div>
+    </div>
+
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>

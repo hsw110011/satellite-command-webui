@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="SkyForge">
+  <defs>
+    <linearGradient id="bg" x1="28" y1="18" x2="226" y2="238" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#102c5f"/>
+      <stop offset="0.55" stop-color="#07182f"/>
+      <stop offset="1" stop-color="#030a17"/>
+    </linearGradient>
+    <linearGradient id="line" x1="62" y1="54" x2="194" y2="201" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#65e2ff"/>
+      <stop offset="1" stop-color="#357cff"/>
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <path d="M32 8h192l24 24v160l-56 56H32L8 224V32z" fill="url(#bg)" stroke="#286bc8" stroke-width="4"/>
+  <path d="M45 42h166v129l-40 41H45z" fill="none" stroke="#1c4d91" stroke-width="3"/>
+  <path d="M76 157c27-54 60-81 105-87-19 18-33 41-42 69 19-3 36-1 51 7-39 3-74 23-105 58 5-17 13-33 24-47-12-2-23-2-33 0z" fill="url(#line)" filter="url(#glow)"/>
+  <circle cx="188" cy="61" r="8" fill="#65e2ff" filter="url(#glow)"/>
+  <path d="M54 54h24M54 54v24M202 190h-24M202 190v-24" stroke="#65e2ff" stroke-width="5" stroke-linecap="square"/>
+</svg>
