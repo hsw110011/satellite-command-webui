@@ -26,7 +26,7 @@ chmod +x "$LAUNCHER" "$ROOT_DIR/scripts/install-ubuntu-launcher.sh"
 if [[ ! -f "$CONFIG_FILE" ]]; then
   cat >"$CONFIG_FILE" <<'EOF'
 # SkyForge launcher configuration.
-# auto: use ROS Noetic when available, otherwise Node demo mode.
+# auto: use ROS Noetic when available, otherwise Python simulation mode.
 SKYFORGE_MODE=auto
 SKYFORGE_HOST=127.0.0.1
 SKYFORGE_PORT=3000
@@ -38,6 +38,7 @@ SKYFORGE_PORT=3000
 # SKYFORGE_FIX_TOPIC=/fix
 # SKYFORGE_ODOM_TOPIC=/odom
 # SKYFORGE_REGION_TOPIC=/selected_region
+# SKYFORGE_EXTRA_SETUP=/home/your-user/catkin_ws/devel/setup.bash
 
 # Optional explicit executable paths.
 # SKYFORGE_PYTHON=/absolute/path/to/project/.venv/bin/python

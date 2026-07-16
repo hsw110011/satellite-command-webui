@@ -23,7 +23,7 @@ Usage:
 
 Modes:
   --auto   Use ROS mode when Noetic and Python dependencies are available;
-           otherwise use the Node demo backend. This is the default.
+           otherwise use the Python simulation backend. This is the default.
   --ros    Require the FastAPI + rospy Noetic backend.
   --demo   Use the Node simulation backend without ROS.
   --app    Open a normal standalone Chromium application window.
@@ -79,6 +79,14 @@ prepare_ros_environment() {
     # shellcheck disable=SC1091
     source "$ROOT_DIR/ros1_ws/devel/setup.bash"
   fi
+  if [[ -n "${SKYFORGE_EXTRA_SETUP:-}" ]]; then
+    if [[ ! -f "$SKYFORGE_EXTRA_SETUP" ]]; then
+      set -u
+      return 1
+    fi
+    # shellcheck disable=SC1090
+    source "$SKYFORGE_EXTRA_SETUP"
+  fi
   set -u
   return 0
 }
@@ -96,7 +104,14 @@ resolve_python() {
 python_ros_ready() {
   local python_bin="$1"
   [[ -n "$python_bin" ]] || return 1
-  "$python_bin" -c 'import fastapi, uvicorn, rospy' >/dev/null 2>&1
+  python_gateway_ready "$python_bin" || return 1
+  "$python_bin" -c 'import rospy' >/dev/null 2>&1
+}
+
+python_gateway_ready() {
+  local python_bin="$1"
+  [[ -n "$python_bin" ]] || return 1
+  "$python_bin" -c 'import fastapi, uvicorn, rasterio, numpy, PIL' >/dev/null 2>&1
 }
 
 resolve_mode() {
@@ -105,8 +120,11 @@ resolve_mode() {
     auto)
       if prepare_ros_environment && python_ros_ready "$python_bin"; then
         MODE="ros"
-      else
+      elif python_gateway_ready "$python_bin"; then
         MODE="demo"
+      else
+        notify_error "Python Gateway 依赖不可用。请安装 ros_backend/requirements.txt。"
+        exit 1
       fi
       ;;
     ros)
@@ -119,7 +137,12 @@ resolve_mode() {
         exit 1
       fi
       ;;
-    demo) ;;
+    demo)
+      if ! python_gateway_ready "$python_bin"; then
+        notify_error "演示模式依赖不可用。请创建虚拟环境并安装 ros_backend/requirements.txt。"
+        exit 1
+      fi
+      ;;
     *) notify_error "SKYFORGE_MODE 必须是 auto、ros 或 demo"; exit 2 ;;
   esac
 }
@@ -191,16 +214,14 @@ start_backend() {
   if [[ "$MODE" == "ros" ]]; then
     (
       cd "$ROOT_DIR"
+      export SKYFORGE_SIMULATION=0
       exec "$python_bin" -m ros_backend.app
     ) >>"$BACKEND_LOG" 2>&1 &
   else
-    if ! command -v node >/dev/null 2>&1; then
-      notify_error "演示模式需要 Node.js。"
-      exit 1
-    fi
     (
       cd "$ROOT_DIR"
-      exec node server.js
+      export SKYFORGE_SIMULATION=1
+      exec "$python_bin" -m ros_backend.app
     ) >>"$BACKEND_LOG" 2>&1 &
   fi
   BACKEND_PID=$!
@@ -246,7 +267,7 @@ run_diagnostics() {
   printf 'mode=%s\n' "$MODE"
   printf 'window=%s\n' "$WINDOW_MODE"
   printf 'python=%s\n' "${python_bin:-missing}"
-  printf 'node=%s\n' "$(command -v node 2>/dev/null || printf missing)"
+  printf 'python_gateway=%s\n' "$(python_gateway_ready "$python_bin" && printf ready || printf missing)"
   printf 'browser=%s\n' "${browser:-missing}"
   printf 'ros_noetic=%s\n' "$([[ -f /opt/ros/noetic/setup.bash ]] && printf available || printf missing)"
   printf 'message_workspace=%s\n' "$([[ -f "$ROOT_DIR/ros1_ws/devel/setup.bash" ]] && printf built || printf not-built)"

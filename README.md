@@ -36,7 +36,7 @@
 | Ubuntu | 20.04 LTS |
 | ROS | Noetic (desktop-full 或 ros-base) |
 | Python | 3.8+ (系统 Python，rospy 依赖) |
-| Node.js | 16+ (仅 demo 模式需要) |
+| Chromium/Chrome | 独立应用窗口模式需要 |
 
 ---
 
@@ -126,7 +126,7 @@ python3 -m ros_backend.app
 npm start
 ```
 
-此模式下后端为静态 Node.js 服务器，不连接 ROS，所有遥测和状态为模拟数据。
+此模式使用 Python Gateway，不连接 ROS，所有遥测和状态为模拟数据，并保留完整 GeoTIFF 功能。
 
 ### 模拟模式（有 Python 无 ROS Master）
 
@@ -135,6 +135,41 @@ SKYFORGE_SIMULATION=1 python3 -m ros_backend.app
 ```
 
 会生成模拟定位轨迹和状态，用于集成测试。
+
+### Ubuntu 独立应用窗口
+
+安装桌面快捷方式：
+
+```bash
+chmod +x scripts/skyforge-launcher.sh scripts/install-ubuntu-launcher.sh
+./scripts/install-ubuntu-launcher.sh
+```
+
+安装后从 Ubuntu 应用菜单打开 `SkyForge`。启动器会自动：
+
+1. 加载 `~/.config/skyforge/skyforge.env`
+2. 检测 ROS Noetic 和 Python 依赖
+3. 启动 FastAPI Gateway
+4. 等待后端就绪
+5. 使用 Chromium/Chrome `--app` 模式打开无地址栏独立窗口
+
+也可以从终端启动：
+
+```bash
+# 自动选择 ROS 或模拟模式
+./scripts/skyforge-launcher.sh --auto --app
+
+# 强制 ROS1 Noetic 模式
+./scripts/skyforge-launcher.sh --ros --app
+
+# 无 ROS 模拟模式
+./scripts/skyforge-launcher.sh --demo --app
+
+# 全屏运行
+./scripts/skyforge-launcher.sh --auto --kiosk
+```
+
+后端日志位于 `~/.local/state/skyforge/backend.log`，窗口日志位于 `~/.local/state/skyforge/window.log`。
 
 ---
 
