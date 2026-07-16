@@ -1,11 +1,12 @@
 {
   "name": "satellite-command-webui",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node server.js",
-    "start:demo": "node server.js",
-    "start:ros": "python3 -m ros_backend.app"
+    "start": "SKYFORGE_SIMULATION=1 python3 -m ros_backend.app",
+    "start:demo": "SKYFORGE_SIMULATION=1 python3 -m ros_backend.app",
+    "start:ros": "python3 -m ros_backend.app",
+    "start:legacy": "node server.js"
   }
 }

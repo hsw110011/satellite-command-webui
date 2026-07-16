@@ -186,6 +186,11 @@ geometry_msgs/Point32[] points   # x=lon, y=lat, z=0
 | POST | `/api/localization/start` | 启动定位 launch |
 | POST | `/api/localization/stop` | 停止定位 launch |
 | POST | `/api/agent/run` | 调用 Agent/VLM |
+| POST | `/api/map/{dom|dsm}/upload` | 上传并加载完整 GeoTIFF |
+| GET | `/api/map/{dom|dsm}/metadata` | 获取尺寸、CRS、边界与概览层级 |
+| GET | `/api/map/{dom|dsm}/tile/{level}/{col}/{row}.png` | 按视口读取 GeoTIFF 栅格块 |
+| POST | `/api/map/{dom|dsm}/coordinates` | WGS84 与原始栅格像素坐标互转 |
+| GET | `/api/map/dsm/elevation` | 查询 DSM 指定位置的高程 |
 | GET | `/events` | SSE 事件流 |
 
 ### SSE 事件类型
@@ -205,23 +210,20 @@ geometry_msgs/Point32[] points   # x=lon, y=lat, z=0
 
 ## 地图数据
 
-前端支持三种地图加载方式：
+前端支持 DOM 与 DSM 两个独立地图视图：
 
 | 方式 | 格式 | 说明 |
 |------|------|------|
 | 在线瓦片 | Esri World Imagery | 默认加载，需要网络 |
-| 本地瓦片 | `z/x/y.png` 目录结构 | 离线环境通过文件选择器加载 |
-| 单张影像 | `.png/.jpg` + `bounds.json` | 正射校正影像 + 经纬度边界 |
+| DOM GeoTIFF | `.tif/.tiff/.geotiff` | 加载完整正射影像并读取文件内坐标系 |
+| DSM GeoTIFF | `.tif/.tiff/.geotiff` | 加载完整表面模型、着色并提供高程查询 |
 
-`bounds.json` 格式：
+大尺寸 TIFF 不会先压缩成一张低清预览图。后端保留原始栅格，根据当前视口读取 256 像素块：全图状态自动使用概览层，放大到 `1:1` 时自动切换到 level 0 原始像素层。DOM 与 DSM 可分别滚轮缩放、拖动、适配全图和单图放大。
 
-```json
-{
-  "north": 40.015,
-  "south": 39.835,
-  "west": 116.315,
-  "east": 116.505
-}
+可用下面的命令检查 TIFF 是否包含坐标：
+
+```bash
+gdalinfo your-map.tif
 ```
 
 ---

@@ -96,110 +96,146 @@
         </nav>
 
         <main class="main-column">
-          <section class="map-panel" aria-label="卫星地图">
-            <div class="map-toolbar" role="toolbar" aria-label="地图工具">
-              <button id="folderButton" class="icon-button" title="读取卫星地图文件夹">
-                <span aria-hidden="true">
-                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M12 4.5 4.5 8 12 11.5 19.5 8 12 4.5Z" />
-                    <path d="M4.5 12 12 15.5 19.5 12" />
-                  </svg>
-                </span>
-                <b>地图文件夹</b>
-              </button>
-              <button id="onlineButton" class="icon-button" title="加载在线卫星瓦片">
-                <span aria-hidden="true">
-                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                    <circle cx="12" cy="12" r="8.3" />
-                    <path d="M3.7 12h16.6M12 3.7c2.4 2.3 2.4 14.3 0 16.6M12 3.7c-2.4 2.3-2.4 14.3 0 16.6" />
-                  </svg>
-                </span>
-                <b>在线影像</b>
-              </button>
-              <button id="rectButton" class="icon-button" title="矩形框选区域">
-                <span aria-hidden="true">
-                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                    <rect x="5" y="6.5" width="14" height="11" rx="1" stroke-dasharray="3.4 2.6" />
-                    <circle cx="5" cy="6.5" r="1.3" fill="currentColor" stroke="none" />
-                    <circle cx="19" cy="17.5" r="1.3" fill="currentColor" stroke="none" />
-                  </svg>
-                </span>
-                <b>矩形</b>
-              </button>
-              <button id="polygonButton" class="icon-button" title="多边形框选区域，双击闭合">
-                <span aria-hidden="true">
-                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M12 4 20 9.6 17 19H7L4 9.6 12 4Z" />
-                    <circle cx="12" cy="4" r="1.25" fill="currentColor" stroke="none" />
-                    <circle cx="20" cy="9.6" r="1.25" fill="currentColor" stroke="none" />
-                    <circle cx="4" cy="9.6" r="1.25" fill="currentColor" stroke="none" />
-                  </svg>
-                </span>
-                <b>多边形</b>
-              </button>
-              <button id="fitButton" class="icon-button" title="适配视图">
-                <span aria-hidden="true">
-                  <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M4 8.5V6a2 2 0 0 1 2-2h2.5M20 8.5V6a2 2 0 0 0-2-2h-2.5M4 15.5V18a2 2 0 0 0 2 2h2.5M20 15.5V18a2 2 0 0 1-2 2h-2.5" />
-                  </svg>
-                </span>
-                <b>适配</b>
-              </button>
-              <input id="folderInput" type="file" webkitdirectory directory multiple hidden />
+          <section class="vehicle-hud" data-rail-target="localization" tabindex="-1" aria-label="车辆定位仪表">
+            <div class="hud-identity">
+              <span class="hud-live-dot"></span>
+              <div>
+                <small>VEHICLE TELEMETRY</small>
+                <strong>融合定位解算</strong>
+              </div>
             </div>
-
-            <div class="map-badge" aria-hidden="true">
-              <span>WGS 84</span>
-              <b>SPATIAL VIEW · LIVE</b>
+            <div class="hud-group pose-group">
+              <span class="hud-group-label">POSITION / WGS84</span>
+              <div class="hud-values">
+                <div><span>LAT</span><b id="latValue">--</b><i>°</i></div>
+                <div><span>LON</span><b id="lonValue">--</b><i>°</i></div>
+                <div><span>ALT</span><b id="altValue">--</b></div>
+              </div>
             </div>
-
-            <div id="mapViewport" class="map-viewport">
-              <div id="mapContent" class="map-content">
-                <svg id="vectorLayer" class="vector-layer" xmlns="http://www.w3.org/2000/svg"></svg>
+            <div class="hud-group motion-group">
+              <span class="hud-group-label">POSE / MOTION</span>
+              <div class="hud-values">
+                <div><span>HDG</span><b id="headingValue">--</b></div>
+                <div class="speed-value"><span>SPD</span><b id="speedValue">--</b></div>
+                <div><span>GROUND</span><b id="groundElevationValue">--</b></div>
               </div>
-              <div class="reticle horizontal" aria-hidden="true"></div>
-              <div class="reticle vertical" aria-hidden="true"></div>
-              <div class="viewport-frame" aria-hidden="true">
-                <i class="corner tl"></i>
-                <i class="corner tr"></i>
-                <i class="corner bl"></i>
-                <i class="corner br"></i>
-              </div>
-              <div class="compass" aria-hidden="true">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M12 3.5 15 12l-3-1.8L9 12l3-8.5Z" fill="currentColor" stroke="none" />
-                  <circle cx="12" cy="12.6" r="8" opacity="0.5" />
-                </svg>
-                <span>N</span>
-              </div>
-              <div class="scale-bar" aria-hidden="true">
-                <i></i>
-                <span>500 m</span>
-              </div>
-              <div id="drawHint" class="draw-hint" hidden>左键添加顶点 · 双击闭合 · 右键撤销</div>
-              <div id="cursorReadout" class="cursor-readout">--</div>
+            </div>
+            <div class="hud-source">
+              <span>SOURCE</span>
+              <b id="sourceValue">--</b>
+              <small id="topicName">/localization/fix</small>
             </div>
           </section>
 
-          <section class="viz-panel" aria-label="定位可视化">
-            <div class="viz-block">
-              <div class="panel-title">
-                <span>2D 轨迹</span>
-                <small id="trajInfo">等待定位数据</small>
+          <section class="dual-map-workspace" aria-label="DOM 与 DSM 双地图">
+            <section class="map-panel map-panel-dom" aria-label="DOM 正射影像地图">
+              <div class="map-pane-title">
+                <div><span class="source-index">01</span><strong>DOM 正射影像</strong></div>
+                <small id="domMapMeta">RGB · NOT LOADED</small>
               </div>
-              <div class="canvas-wrap">
-                <canvas id="trajectoryCanvas"></canvas>
+              <div class="map-toolbar" role="toolbar" aria-label="DOM 地图工具">
+                <div class="map-toolbar-row map-toolbar-row-source">
+                  <span class="toolbar-label">数据源</span>
+                  <button id="domFileButton" class="icon-button source-button" type="button" title="选择并上传 DOM TIFF 文件">
+                    <span aria-hidden="true">▧</span><b>选择 TIFF</b>
+                  </button>
+                  <button id="domFolderButton" class="icon-button source-button" type="button" title="从文件夹中选择并上传 DOM TIFF">
+                    <span aria-hidden="true">▱</span><b>选择文件夹</b>
+                  </button>
+                  <button id="onlineButton" class="icon-button source-button" type="button" title="加载在线卫星瓦片">
+                    <span aria-hidden="true">◎</span><b>在线影像</b>
+                  </button>
+                </div>
+                <div class="map-toolbar-row map-toolbar-row-actions">
+                  <span class="toolbar-label">地图操作</span>
+                  <button id="rectButton" class="icon-button action-button" type="button" title="矩形框选区域">
+                    <span aria-hidden="true">□</span><b>矩形</b>
+                  </button>
+                  <button id="polygonButton" class="icon-button action-button" type="button" title="多边形框选区域，双击闭合">
+                    <span aria-hidden="true">⬡</span><b>多边形</b>
+                  </button>
+                  <div class="map-zoom-control" role="group" aria-label="DOM 缩放控制">
+                    <button id="domZoomOutButton" type="button" title="缩小 DOM" aria-label="缩小 DOM">−</button>
+                    <button id="domNativeButton" class="zoom-value" type="button" title="DOM 原始分辨率 1:1"><span id="domZoomValue">100%</span></button>
+                    <button id="domZoomInButton" type="button" title="放大 DOM" aria-label="放大 DOM">+</button>
+                  </div>
+                  <button id="fitButton" class="icon-button action-button compact-command" type="button" title="适配完整 DOM 影像">
+                    <span aria-hidden="true">⌗</span><b>全图</b>
+                  </button>
+                  <button id="domExpandButton" class="icon-button action-button compact-command" type="button" title="单独放大 DOM 地图" aria-pressed="false">
+                    <span aria-hidden="true">⛶</span><b>单图</b>
+                  </button>
+                </div>
+                <input id="domFileInput" type="file" accept=".tif,.tiff,.geotiff" hidden />
+                <input id="domFolderInput" type="file" accept=".tif,.tiff,.geotiff" webkitdirectory directory multiple hidden />
               </div>
-            </div>
-            <div class="viz-block">
-              <div class="panel-title">
-                <span>数据曲线</span>
-                <div class="legend" id="curveLegend"></div>
+              <div class="map-badge" aria-hidden="true"><span>WGS 84</span><b>DOM / LIVE</b></div>
+              <div id="mapViewport" class="map-viewport">
+                <div id="mapContent" class="map-content">
+                  <svg id="vectorLayer" class="vector-layer" xmlns="http://www.w3.org/2000/svg"></svg>
+                </div>
+                <div class="reticle horizontal" aria-hidden="true"></div>
+                <div class="reticle vertical" aria-hidden="true"></div>
+                <div class="viewport-frame" aria-hidden="true">
+                  <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+                </div>
+                <div class="compass" aria-hidden="true"><span>N</span></div>
+                <div class="scale-bar" aria-hidden="true"><i></i><span>500 m</span></div>
+                <div id="drawHint" class="draw-hint" hidden>左键添加顶点 · 双击闭合 · 右键撤销</div>
+                <div id="cursorReadout" class="cursor-readout">--</div>
               </div>
-              <div class="canvas-wrap">
-                <canvas id="curveCanvas"></canvas>
+            </section>
+
+            <section class="map-panel map-panel-dsm" aria-label="DSM 高程地图">
+              <div class="map-pane-title">
+                <div><span class="source-index">02</span><strong>DSM 表面模型</strong></div>
+                <small id="dsmMapMeta">ELEVATION · NOT LOADED</small>
               </div>
-            </div>
+              <div class="map-toolbar dsm-toolbar" role="toolbar" aria-label="DSM 地图工具">
+                <div class="map-toolbar-row map-toolbar-row-source">
+                  <span class="toolbar-label">数据源</span>
+                  <button id="dsmFileButton" class="icon-button source-button" type="button" title="选择并上传 DSM TIFF 文件">
+                    <span aria-hidden="true">△</span><b>选择 TIFF</b>
+                  </button>
+                  <button id="dsmFolderButton" class="icon-button source-button" type="button" title="从文件夹中选择并上传 DSM TIFF">
+                    <span aria-hidden="true">▱</span><b>选择文件夹</b>
+                  </button>
+                </div>
+                <div class="map-toolbar-row map-toolbar-row-actions">
+                  <span class="toolbar-label">地图操作</span>
+                  <div class="map-zoom-control" role="group" aria-label="DSM 缩放控制">
+                    <button id="dsmZoomOutButton" type="button" title="缩小 DSM" aria-label="缩小 DSM">−</button>
+                    <button id="dsmNativeButton" class="zoom-value" type="button" title="DSM 原始分辨率 1:1"><span id="dsmZoomValue">100%</span></button>
+                    <button id="dsmZoomInButton" type="button" title="放大 DSM" aria-label="放大 DSM">+</button>
+                  </div>
+                  <button id="dsmFitButton" class="icon-button action-button compact-command" type="button" title="适配完整 DSM 影像">
+                    <span aria-hidden="true">⌗</span><b>全图</b>
+                  </button>
+                  <button id="dsmExpandButton" class="icon-button action-button compact-command" type="button" title="单独放大 DSM 地图" aria-pressed="false">
+                    <span aria-hidden="true">⛶</span><b>单图</b>
+                  </button>
+                  <div class="elevation-range" aria-label="DSM 高程色带">
+                    <i></i><span id="dsmRangeValue">-- m</span>
+                  </div>
+                </div>
+                <input id="dsmFileInput" type="file" accept=".tif,.tiff,.geotiff" hidden />
+                <input id="dsmFolderInput" type="file" accept=".tif,.tiff,.geotiff" webkitdirectory directory multiple hidden />
+              </div>
+              <div class="map-badge dsm-badge" aria-hidden="true"><span>WGS 84</span><b>DSM / ELEVATION</b></div>
+              <div id="dsmViewport" class="map-viewport dsm-viewport">
+                <div id="dsmContent" class="map-content">
+                  <svg id="dsmVectorLayer" class="vector-layer" xmlns="http://www.w3.org/2000/svg"></svg>
+                </div>
+                <div class="reticle horizontal" aria-hidden="true"></div>
+                <div class="reticle vertical" aria-hidden="true"></div>
+                <div class="viewport-frame" aria-hidden="true">
+                  <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
+                </div>
+                <div class="compass" aria-hidden="true"><span>N</span></div>
+                <div class="scale-bar" aria-hidden="true"><i></i><span>500 m</span></div>
+                <div id="dsmCursorReadout" class="cursor-readout">高程 --</div>
+              </div>
+            </section>
           </section>
         </main>
 
@@ -309,21 +345,6 @@
               <button id="runAgentButton" class="primary-button">运行</button>
             </div>
             <pre id="agentOutput" class="agent-output">READY</pre>
-          </section>
-
-          <section class="monitor-panel" data-view="localization">
-            <div class="panel-title">
-              <span>定位 / 数据</span>
-              <small id="topicName">/localization/fix</small>
-            </div>
-            <div class="telemetry-grid">
-              <div><span>LAT</span><b id="latValue">--</b></div>
-              <div><span>LON</span><b id="lonValue">--</b></div>
-              <div><span>ALT</span><b id="altValue">--</b></div>
-              <div><span>HDG</span><b id="headingValue">--</b></div>
-              <div><span>SPD</span><b id="speedValue">--</b></div>
-              <div><span>SRC</span><b id="sourceValue">--</b></div>
-            </div>
           </section>
 
           <section class="log-panel" data-view="log">

@@ -183,6 +183,14 @@ class RosBridge:
         with self._lock:
             publisher = self._publishers.get(topic)
             if publisher is None:
+                # LRU: limit cached publishers to 5, unregister oldest
+                if len(self._publishers) >= 5:
+                    oldest_topic = next(iter(self._publishers))
+                    old_pub = self._publishers.pop(oldest_topic)
+                    try:
+                        old_pub.unregister()
+                    except Exception:
+                        pass
                 publisher = rospy.Publisher(topic, self._message_class, queue_size=10, latch=False)
                 self._publishers[topic] = publisher
 
@@ -301,15 +309,12 @@ class RosBridge:
         speed = math.sqrt(linear.x * linear.x + linear.y * linear.y + linear.z * linear.z)
         with self._lock:
             self._latest.update({"heading": heading, "speed": speed})
-            has_fix = self._latest["lat"] is not None and self._latest["lon"] is not None
-        if has_fix:
-            self._emit_telemetry(self.settings.odom_topic)
+        # Always emit telemetry (lat/lon may be None, frontend handles it)
+        self._emit_telemetry(self.settings.odom_topic)
 
     def _emit_telemetry(self, source_topic: str) -> None:
         with self._lock:
             telemetry = dict(self._latest)
-        if telemetry["lat"] is None or telemetry["lon"] is None:
-            return
         telemetry.update(
             {
                 "time": _now(),

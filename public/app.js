@@ -1,117 +1,104 @@
 const $ = (selector) => document.querySelector(selector);
 
 const elements = {
-  backendState: $("#backendState"),
-  gatewayState: $("#gatewayState"),
-  rosState: $("#rosState"),
-  mapState: $("#mapState"),
-  locState: $("#locState"),
-  publishState: $("#publishState"),
-  bridgeMode: $("#bridgeMode"),
-  systemClock: $("#systemClock"),
-  folderButton: $("#folderButton"),
-  onlineButton: $("#onlineButton"),
-  rectButton: $("#rectButton"),
-  polygonButton: $("#polygonButton"),
-  fitButton: $("#fitButton"),
-  folderInput: $("#folderInput"),
-  mapViewport: $("#mapViewport"),
-  mapContent: $("#mapContent"),
-  vectorLayer: $("#vectorLayer"),
-  drawHint: $("#drawHint"),
-  cursorReadout: $("#cursorReadout"),
-  flagSelect: $("#flagSelect"),
-  regionSelect: $("#regionSelect"),
-  deleteRegionButton: $("#deleteRegionButton"),
-  topicInput: $("#topicInput"),
-  publishButton: $("#publishButton"),
-  stopButton: $("#stopButton"),
-  publishStatus: $("#publishStatus"),
-  startLocButton: $("#startLocButton"),
-  locProgramState: $("#locProgramState"),
-  rosMasterValue: $("#rosMasterValue"),
-  rosNodeValue: $("#rosNodeValue"),
-  messageTypeValue: $("#messageTypeValue"),
-  launchConfigValue: $("#launchConfigValue"),
-  processValue: $("#processValue"),
-  localizationError: $("#localizationError"),
-  graphEndpoint: $("#graphEndpoint"),
-  agentPrompt: $("#agentPrompt"),
-  agentType: $("#agentType"),
-  runAgentButton: $("#runAgentButton"),
-  agentOutput: $("#agentOutput"),
-  topicName: $("#topicName"),
-  latValue: $("#latValue"),
-  lonValue: $("#lonValue"),
-  altValue: $("#altValue"),
-  headingValue: $("#headingValue"),
-  speedValue: $("#speedValue"),
-  sourceValue: $("#sourceValue"),
-  regionReadout: $("#regionReadout"),
-  trajectoryCanvas: $("#trajectoryCanvas"),
-  curveCanvas: $("#curveCanvas"),
-  curveLegend: $("#curveLegend"),
-  trajInfo: $("#trajInfo"),
-  eventLog: $("#eventLog")
+  backendState: $("#backendState"), gatewayState: $("#gatewayState"), rosState: $("#rosState"),
+  mapState: $("#mapState"), locState: $("#locState"), publishState: $("#publishState"),
+  bridgeMode: $("#bridgeMode"), systemClock: $("#systemClock"),
+  domFileButton: $("#domFileButton"), domFolderButton: $("#domFolderButton"), onlineButton: $("#onlineButton"),
+  rectButton: $("#rectButton"), polygonButton: $("#polygonButton"), fitButton: $("#fitButton"),
+  domZoomOutButton: $("#domZoomOutButton"), domNativeButton: $("#domNativeButton"), domZoomInButton: $("#domZoomInButton"),
+  domZoomValue: $("#domZoomValue"), domExpandButton: $("#domExpandButton"),
+  domFileInput: $("#domFileInput"), domFolderInput: $("#domFolderInput"),
+  dsmFileButton: $("#dsmFileButton"), dsmFolderButton: $("#dsmFolderButton"), dsmFitButton: $("#dsmFitButton"),
+  dsmZoomOutButton: $("#dsmZoomOutButton"), dsmNativeButton: $("#dsmNativeButton"), dsmZoomInButton: $("#dsmZoomInButton"),
+  dsmZoomValue: $("#dsmZoomValue"), dsmExpandButton: $("#dsmExpandButton"),
+  dsmFileInput: $("#dsmFileInput"), dsmFolderInput: $("#dsmFolderInput"),
+  mapWorkspace: $(".dual-map-workspace"),
+  mapViewport: $("#mapViewport"), mapContent: $("#mapContent"), vectorLayer: $("#vectorLayer"),
+  dsmViewport: $("#dsmViewport"), dsmContent: $("#dsmContent"), dsmVectorLayer: $("#dsmVectorLayer"),
+  drawHint: $("#drawHint"), cursorReadout: $("#cursorReadout"), dsmCursorReadout: $("#dsmCursorReadout"),
+  domMapMeta: $("#domMapMeta"), dsmMapMeta: $("#dsmMapMeta"), dsmRangeValue: $("#dsmRangeValue"),
+  groundElevationValue: $("#groundElevationValue"), flagSelect: $("#flagSelect"),
+  regionSelect: $("#regionSelect"), deleteRegionButton: $("#deleteRegionButton"), topicInput: $("#topicInput"),
+  publishButton: $("#publishButton"), stopButton: $("#stopButton"), publishStatus: $("#publishStatus"),
+  startLocButton: $("#startLocButton"), locProgramState: $("#locProgramState"),
+  rosMasterValue: $("#rosMasterValue"), rosNodeValue: $("#rosNodeValue"),
+  messageTypeValue: $("#messageTypeValue"), launchConfigValue: $("#launchConfigValue"),
+  processValue: $("#processValue"), localizationError: $("#localizationError"),
+  graphEndpoint: $("#graphEndpoint"), agentPrompt: $("#agentPrompt"), agentType: $("#agentType"),
+  runAgentButton: $("#runAgentButton"), agentOutput: $("#agentOutput"), topicName: $("#topicName"),
+  latValue: $("#latValue"), lonValue: $("#lonValue"), altValue: $("#altValue"),
+  headingValue: $("#headingValue"), speedValue: $("#speedValue"), sourceValue: $("#sourceValue"),
+  regionReadout: $("#regionReadout"), eventLog: $("#eventLog")
 };
 
 const TILE_SIZE = 256;
 const MAX_HISTORY = 240;
+const MAX_VISIBLE_TILES = 200;
+const MIN_MAP_SCALE = 0.0001;
+const MAX_MAP_SCALE = 32;
 const SVG_NS = "http://www.w3.org/2000/svg";
-const CURVE_SERIES = [
-  { key: "altitude", label: "高度", color: "#55b8e8", unit: "m" },
-  { key: "speed", label: "速度", color: "#62d49c", unit: "m/s" },
-  { key: "heading", label: "航向", color: "#e9a84a", unit: "°" }
-];
 const ONLINE_TILE_SOURCE = {
-  label: "Esri World Imagery",
-  z: 15,
-  centerX: 26979,
-  centerY: 12416,
-  radiusX: 3,
-  radiusY: 2,
-  url: (z, x, y) =>
-    `https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`
+  label: "Esri World Imagery", z: 15, centerX: 26979, centerY: 12416, radiusX: 3, radiusY: 2,
+  fingerprint: "online:esri-world-imagery:z15:26976-26982:12414-12418",
+  url: (z, x, y) => `https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`
 };
-const DEFAULT_BOUNDS = {
-  north: 40.015,
-  west: 116.315,
-  south: 39.835,
-  east: 116.505
-};
+const DEFAULT_BOUNDS = { north: 40.015, west: 116.315, south: 39.835, east: 116.505 };
+const createSource = (type = "demo") => ({
+  type, fingerprint: `${type}:empty`, width: 1600, height: 1000, bounds: DEFAULT_BOUNDS,
+  z: null, minX: 0, minY: 0, loaded: false
+});
 
 const state = {
-  source: {
-    type: "demo",
-    width: 1600,
-    height: 1000,
-    bounds: DEFAULT_BOUNDS,
-    z: null,
-    minX: 0,
-    minY: 0
-  },
+  source: createSource(),
   view: { x: 0, y: 0, scale: 1 },
-  regions: [],
-  selectedRegionId: "",
-  drawMode: null,
   drag: null,
-  selectionEl: null,
-  polygonPoints: [],
-  polygonCursor: null,
-  latestTelemetry: null,
-  telemetryHistory: [],
-  publishing: false,
-  publishingStatus: null,
-  localizationRunning: false,
-  localizationStatus: null,
-  system: null
+  dsmSource: createSource("dsm-empty"),
+  dsmView: { x: 0, y: 0, scale: 1 },
+  dsmDrag: null,
+  regions: [], selectedRegionId: "", drawMode: null, selectionEl: null,
+  polygonPoints: [], polygonCursor: null, latestTelemetry: null, telemetryHistory: [],
+  publishing: false, publishingStatus: null, localizationRunning: false,
+  localizationStatus: null, system: null, uploading: { dom: false, dsm: false },
+  focusedMap: null
 };
+
+const trajectoryNodes = { dom: null, dsm: null };
+const trajectoryProjection = {
+  dom: { fingerprint: null, pixels: new Map(), pending: new Set(), timer: 0, controller: null, requestId: 0 },
+  dsm: { fingerprint: null, pixels: new Map(), pending: new Set(), timer: 0, controller: null, requestId: 0 }
+};
+const tileRefreshRaf = { dom: 0, dsm: 0 };
+let trajectoryRaf = 0;
+let telemetrySequence = 0;
+let domPointerTimer = 0;
+let domPointerController = null;
+let domPointerRequestId = 0;
+let dsmPointerTimer = 0;
+let dsmPointerController = null;
+let dsmPointerRequestId = 0;
+let telemetryElevationTimer = 0;
+let telemetryElevationController = null;
+let telemetryElevationRequestId = 0;
+
+function on(element, eventName, handler, options) {
+  element?.addEventListener(eventName, handler, options);
+}
+
+function scheduleTrajectoryUpdate() {
+  if (trajectoryRaf) return;
+  trajectoryRaf = requestAnimationFrame(() => {
+    trajectoryRaf = 0;
+    updateTrajectoryElements("dom");
+    updateTrajectoryElements("dsm");
+  });
+}
 
 init();
 
 function init() {
-  renderCurveLegend();
   renderOnlineTiles();
+  ensureDsmVectorLayer();
   bindEvents();
   connectEvents();
   loadRegions();
@@ -119,55 +106,72 @@ function init() {
   updateClock();
   window.setInterval(updateClock, 1000);
   requestAnimationFrame(() => {
-    fitView();
-    drawVisualizations();
+    fitView("dom");
+    fitView("dsm");
   });
   addLog("WebUI 已启动");
   bindRailNavigation();
 }
 
 function bindEvents() {
-  elements.folderButton.addEventListener("click", () => elements.folderInput.click());
-  elements.onlineButton.addEventListener("click", renderOnlineTiles);
-  elements.folderInput.addEventListener("change", handleFolder);
-  elements.fitButton.addEventListener("click", fitView);
-  elements.rectButton.addEventListener("click", () => toggleDrawMode("rectangle"));
-  elements.polygonButton.addEventListener("click", () => toggleDrawMode("polygon"));
+  on(elements.domFileButton, "click", () => elements.domFileInput?.click());
+  on(elements.domFolderButton, "click", () => elements.domFolderInput?.click());
+  on(elements.dsmFileButton, "click", () => elements.dsmFileInput?.click());
+  on(elements.dsmFolderButton, "click", () => elements.dsmFolderInput?.click());
+  on(elements.domFileInput, "change", (event) => handleTiffSelection("dom", event, false));
+  on(elements.domFolderInput, "change", (event) => handleTiffSelection("dom", event, true));
+  on(elements.dsmFileInput, "change", (event) => handleTiffSelection("dsm", event, false));
+  on(elements.dsmFolderInput, "change", (event) => handleTiffSelection("dsm", event, true));
+  on(elements.onlineButton, "click", renderOnlineTiles);
+  on(elements.fitButton, "click", () => fitView("dom"));
+  on(elements.dsmFitButton, "click", () => fitView("dsm"));
+  on(elements.domZoomOutButton, "click", () => zoomBy("dom", 0.8));
+  on(elements.domNativeButton, "click", () => setNativeScale("dom"));
+  on(elements.domZoomInButton, "click", () => zoomBy("dom", 1.25));
+  on(elements.dsmZoomOutButton, "click", () => zoomBy("dsm", 0.8));
+  on(elements.dsmNativeButton, "click", () => setNativeScale("dsm"));
+  on(elements.dsmZoomInButton, "click", () => zoomBy("dsm", 1.25));
+  on(elements.domExpandButton, "click", () => toggleMapFocus("dom"));
+  on(elements.dsmExpandButton, "click", () => toggleMapFocus("dsm"));
+  on(elements.rectButton, "click", () => toggleDrawMode("rectangle"));
+  on(elements.polygonButton, "click", () => toggleDrawMode("polygon"));
 
-  elements.mapViewport.addEventListener("mousedown", onPointerDown);
-  elements.mapViewport.addEventListener("mousemove", onPointerMove);
-  elements.mapViewport.addEventListener("dblclick", onDoubleClick);
-  window.addEventListener("mouseup", onPointerUp);
-  elements.mapViewport.addEventListener("wheel", onWheel, { passive: false });
-  elements.mapViewport.addEventListener("contextmenu", onContextMenu);
-  window.addEventListener("resize", () => {
-    fitView();
-    drawVisualizations();
+  on(elements.mapViewport, "mousedown", onPointerDown);
+  on(elements.mapViewport, "mousemove", onPointerMove);
+  on(elements.mapViewport, "dblclick", onDoubleClick);
+  on(elements.mapViewport, "wheel", onWheel, { passive: false });
+  on(elements.mapViewport, "contextmenu", onContextMenu);
+  on(elements.dsmViewport, "mousedown", onDsmPointerDown);
+  on(elements.dsmViewport, "mousemove", onDsmPointerMove);
+  on(elements.dsmViewport, "wheel", onDsmWheel, { passive: false });
+  on(window, "mouseup", onPointerUp);
+  on(window, "resize", () => {
+    if (state.focusedMap) fitView(state.focusedMap);
+    else {
+      fitView("dom");
+      fitView("dsm");
+    }
+  });
+  on(window, "keydown", (event) => {
+    if (event.key === "Escape" && state.focusedMap) toggleMapFocus(state.focusedMap);
   });
 
-  elements.regionSelect.addEventListener("change", () => {
+  on(elements.regionSelect, "change", () => {
     state.selectedRegionId = elements.regionSelect.value;
     elements.deleteRegionButton.disabled = !state.selectedRegionId;
     renderSavedRegions();
     updateRegionReadout();
   });
-  elements.flagSelect.addEventListener("change", () => {
+  on(elements.flagSelect, "change", () => {
     updateRegionReadout();
     addLog(`切换标识位: ${elements.flagSelect.value}`);
   });
-  elements.topicInput.addEventListener("input", updateRegionReadout);
-  elements.deleteRegionButton.addEventListener("click", deleteSelectedRegion);
-
-  elements.publishButton.addEventListener("click", startPublishing);
-  elements.stopButton.addEventListener("click", stopPublishing);
-  elements.startLocButton.addEventListener("click", toggleLocalization);
-  elements.runAgentButton.addEventListener("click", runAgent);
-
-  if ("ResizeObserver" in window) {
-    const observer = new ResizeObserver(drawVisualizations);
-    observer.observe(elements.trajectoryCanvas.parentElement);
-    observer.observe(elements.curveCanvas.parentElement);
-  }
+  on(elements.topicInput, "input", updateRegionReadout);
+  on(elements.deleteRegionButton, "click", deleteSelectedRegion);
+  on(elements.publishButton, "click", startPublishing);
+  on(elements.stopButton, "click", stopPublishing);
+  on(elements.startLocButton, "click", toggleLocalization);
+  on(elements.runAgentButton, "click", runAgent);
 }
 
 function toggleDrawMode(mode) {
@@ -213,43 +217,397 @@ function renderOnlineTiles() {
   addLog(`加载在线瓦片: ${ONLINE_TILE_SOURCE.label}`);
 }
 
-async function handleFolder(event) {
-  const files = Array.from(event.target.files || []);
-  if (!files.length) return;
-
-  addLog(`读取文件夹: ${files.length} 个文件`);
-  const metadata = await readMetadata(files);
-  const tiles = buildTileSet(files);
-
-  if (tiles) {
-    renderTiles(tiles);
-    setMapReady(`瓦片 z${tiles.z} / ${tiles.tiles.length}`);
-    addLog(`加载瓦片: z=${tiles.z}, count=${tiles.tiles.length}`);
-    return;
-  }
-
-  const imageFile = files.find((file) => /\.(png|jpe?g|webp)$/i.test(file.name));
-  if (imageFile) {
-    await renderSingleImage(imageFile, metadata || DEFAULT_BOUNDS);
-    setMapReady("单张影像");
-    addLog(`加载影像: ${imageFile.name}`);
-    return;
-  }
-
-  addLog("未找到可用影像文件");
+function isTiffFile(file) {
+  return /\.(?:tif|tiff|geotiff)$/i.test(file?.name || "");
 }
 
-async function readMetadata(files) {
-  const jsonFile = files.find((file) =>
-    /(^|\/)(bounds|metadata|geo)\.json$/i.test(file.webkitRelativePath || file.name)
-  );
-  if (!jsonFile) return null;
-  try {
-    return normalizeBounds(JSON.parse(await jsonFile.text()));
-  } catch (error) {
-    addLog(`metadata 解析失败: ${error.message}`);
-    return null;
+function fileDisplayName(file) {
+  return file.webkitRelativePath || file.name;
+}
+
+async function handleTiffSelection(kind, event, fromFolder) {
+  const input = event.currentTarget;
+  const files = Array.from(input?.files || []).filter(isTiffFile);
+  input.value = "";
+  const label = labelForMap(kind);
+
+  if (!files.length) {
+    setUploadStatus(kind, fromFolder ? "所选文件夹中没有 TIFF" : "未选择 TIFF", true);
+    addLog(`${label}: ${fromFolder ? "文件夹中未找到" : "未选择"} TIFF`);
+    return;
   }
+
+  files.sort((a, b) => fileDisplayName(a).localeCompare(fileDisplayName(b), "zh-CN", { numeric: true }));
+  const selected = files[0];
+  if (files.length > 1) {
+    const rule = `检测到 ${files.length} 个 TIFF，按路径自然排序选择第一个: ${fileDisplayName(selected)}`;
+    setUploadStatus(kind, rule);
+    addLog(`${label}: ${rule}`);
+  } else {
+    setUploadStatus(kind, `已选择 ${fileDisplayName(selected)}`);
+  }
+  await uploadGeoTiff(kind, selected);
+}
+
+async function uploadGeoTiff(kind, file) {
+  if (state.uploading[kind]) return;
+  const label = labelForMap(kind);
+  const displayName = fileDisplayName(file);
+  state.uploading[kind] = true;
+  setUploadControlsDisabled(kind, true);
+  setUploadStatus(kind, `上传中 · ${displayName} · ${formatBytes(file.size)}`);
+  addLog(`${label} 上传开始: ${displayName} (${formatBytes(file.size)})`);
+
+  try {
+    const url = `/api/map/${kind}/upload?filename=${encodeURIComponent(file.name)}`;
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": file.type || "application/octet-stream", accept: "application/json" },
+      body: file
+    });
+    const data = await readApiResponse(response);
+    const meta = data.map || data.metadata || data;
+    if (!meta?.loaded) throw new Error("上传成功，但返回的地图元数据无效");
+    renderGeoTiff(kind, meta);
+    fitView(kind);
+    const metaElement = kind === "dsm" ? elements.dsmMapMeta : elements.domMapMeta;
+    if (metaElement) {
+      metaElement.textContent = `${displayName} · ${meta.width}×${meta.height}`;
+      metaElement.title = displayName;
+    }
+    setUploadStatus(kind, `已加载 ${displayName} · ${meta.width}×${meta.height}`);
+    addLog(`${label} 已加载: ${displayName}, ${meta.width}×${meta.height}px, CRS: ${meta.crs || "UNKNOWN"}`);
+  } catch (error) {
+    setUploadStatus(kind, `上传失败 · ${error.message}`, true);
+    addLog(`${label} 上传失败: ${error.message}`);
+  } finally {
+    state.uploading[kind] = false;
+    setUploadControlsDisabled(kind, false);
+  }
+}
+
+function setUploadControlsDisabled(kind, disabled) {
+  const buttons = kind === "dsm"
+    ? [elements.dsmFileButton, elements.dsmFolderButton]
+    : [elements.domFileButton, elements.domFolderButton];
+  buttons.forEach((button) => { if (button) button.disabled = disabled; });
+}
+
+function setUploadStatus(kind, message, isError = false) {
+  const output = kind === "dsm" ? elements.dsmCursorReadout : elements.cursorReadout;
+  if (!output) return;
+  output.textContent = message;
+  output.classList.toggle("error", isError);
+}
+
+async function readApiResponse(response) {
+  const contentType = response.headers.get("content-type") || "";
+  const text = await response.text();
+  let data = {};
+  if (text) {
+    if (contentType.includes("application/json")) {
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error(`服务器返回了无效 JSON (HTTP ${response.status})`);
+      }
+    } else {
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = { error: text.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 240) };
+      }
+    }
+  }
+  if (!response.ok || data.ok === false) {
+    const fallback = `Request failed: ${response.status}${response.statusText ? ` ${response.statusText}` : ""}`;
+    const error = new Error(data.error || data.detail || fallback);
+    error.data = data;
+    throw error;
+  }
+  return data;
+}
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes < 1024) return `${bytes || 0} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes / 1024;
+  let unit = units[0];
+  for (let index = 1; index < units.length && value >= 1024; index += 1) {
+    value /= 1024;
+    unit = units[index];
+  }
+  return `${value.toFixed(value >= 10 ? 1 : 2)} ${unit}`;
+}
+
+function renderGeoTiff(kind, meta) {
+  const isDsm = kind === "dsm";
+  const content = isDsm ? elements.dsmContent : elements.mapContent;
+  const width = Number(meta.width) || 1600;
+  const height = Number(meta.height) || 1000;
+  const fingerprint = String(meta.fingerprint || `geotiff-${kind}:${width}x${height}`);
+  const source = {
+    type: `geotiff-${kind}`,
+    fingerprint,
+    width,
+    height,
+    bounds: normalizeBounds(meta.bounds || DEFAULT_BOUNDS),
+    z: null,
+    minX: 0,
+    minY: 0,
+    loaded: true,
+    metadata: meta,
+    levels: normalizeOverviewLevels(meta, width, height),
+    tileNodes: new Map(),
+    currentLevel: null
+  };
+  if (isDsm) state.dsmSource = source;
+  else state.source = source;
+
+  content.innerHTML = "";
+  content.dataset.sourceMode = "geotiff";
+  content.style.width = `${width}px`;
+  content.style.height = `${height}px`;
+  handleMapSourceChanged(kind);
+
+  if (isDsm) {
+    ensureDsmVectorLayer();
+    const elevation = meta.elevation || {};
+    const min = toFiniteNumber(elevation.min);
+    const max = toFiniteNumber(elevation.max);
+    elements.dsmMapMeta.textContent = `${width}×${height} · ${meta.crs || "UNKNOWN"}`;
+    elements.dsmRangeValue.textContent = min !== null && max !== null
+      ? `${min.toFixed(1)}–${max.toFixed(1)} ${elevation.unit || "m"}` : "-- m";
+    const telemetryLat = toFiniteNumber(state.latestTelemetry?.lat);
+    const telemetryLon = toFiniteNumber(state.latestTelemetry?.lon);
+    if (telemetryLat !== null && telemetryLon !== null) queryTelemetryElevation(telemetryLat, telemetryLon);
+  } else {
+    ensureVectorLayer();
+    renderSavedRegions();
+    elements.domMapMeta.textContent = `${width}×${height} · ${meta.crs || "UNKNOWN"}`;
+    setMapReady(`DOM 已加载 · ${width}×${height} 原始分辨率`);
+  }
+  scheduleTileRefresh(kind);
+  scheduleTrajectoryUpdate();
+}
+
+function normalizeOverviewLevels(meta, sourceWidth, sourceHeight) {
+  const input = Array.isArray(meta.levels) && meta.levels.length
+    ? meta.levels
+    : [{ level: 0, factor: 1, width: sourceWidth, height: sourceHeight, tileCols: meta.tileCols, tileRows: meta.tileRows }];
+  return input.map((item, index) => {
+    const factor = Math.max(1, Number(item.factor) || 1);
+    const width = Math.max(1, Number(item.width) || Math.ceil(sourceWidth / factor));
+    const height = Math.max(1, Number(item.height) || Math.ceil(sourceHeight / factor));
+    return {
+      level: item.level ?? index,
+      factor,
+      width,
+      height,
+      tileCols: Math.max(1, Number(item.tileCols) || Math.ceil(width / TILE_SIZE)),
+      tileRows: Math.max(1, Number(item.tileRows) || Math.ceil(height / TILE_SIZE))
+    };
+  }).sort((a, b) => a.factor - b.factor);
+}
+
+function isGeoTiffSource(source) {
+  return Boolean(source?.loaded && String(source.type).startsWith("geotiff-"));
+}
+
+function scheduleTileRefresh(kind) {
+  const source = mapParts(kind).source;
+  if (!isGeoTiffSource(source) || tileRefreshRaf[kind]) return;
+  tileRefreshRaf[kind] = requestAnimationFrame(() => {
+    tileRefreshRaf[kind] = 0;
+    refreshGeoTiffTiles(kind);
+  });
+}
+
+function visibleTileRange(kind, level) {
+  const { source, view, viewport } = mapParts(kind);
+  const rect = viewport?.getBoundingClientRect();
+  if (!rect?.width || !rect.height) return null;
+  const span = TILE_SIZE * level.factor;
+  const rawLeft = -view.x / view.scale;
+  const rawTop = -view.y / view.scale;
+  const rawRight = (rect.width - view.x) / view.scale;
+  const rawBottom = (rect.height - view.y) / view.scale;
+  if (rawRight <= 0 || rawBottom <= 0 || rawLeft >= source.width || rawTop >= source.height) return null;
+  const left = clamp(rawLeft, 0, source.width);
+  const top = clamp(rawTop, 0, source.height);
+  const right = clamp(rawRight, 0, source.width);
+  const bottom = clamp(rawBottom, 0, source.height);
+  return {
+    firstCol: clamp(Math.floor(left / span) - 1, 0, level.tileCols - 1),
+    lastCol: clamp(Math.floor(Math.max(left, right - 0.0001) / span) + 1, 0, level.tileCols - 1),
+    firstRow: clamp(Math.floor(top / span) - 1, 0, level.tileRows - 1),
+    lastRow: clamp(Math.floor(Math.max(top, bottom - 0.0001) / span) + 1, 0, level.tileRows - 1),
+    centerCol: clamp(Math.floor(((left + right) / 2) / span), 0, level.tileCols - 1),
+    centerRow: clamp(Math.floor(((top + bottom) / 2) / span), 0, level.tileRows - 1)
+  };
+}
+
+function visibleTileCount(kind, level) {
+  const range = visibleTileRange(kind, level);
+  return range ? (range.lastCol - range.firstCol + 1) * (range.lastRow - range.firstRow + 1) : 0;
+}
+
+function visibleTilesForLevel(kind, level) {
+  const range = visibleTileRange(kind, level);
+  if (!range) return [];
+  const total = (range.lastCol - range.firstCol + 1) * (range.lastRow - range.firstRow + 1);
+  const tiles = [];
+  const seen = new Set();
+  const addTile = (col, row) => {
+    const key = `${col}:${row}`;
+    if (seen.has(key) || tiles.length >= MAX_VISIBLE_TILES) return;
+    seen.add(key);
+    tiles.push({ col, row });
+  };
+  if (total <= MAX_VISIBLE_TILES) {
+    for (let row = range.firstRow; row <= range.lastRow; row += 1) {
+      for (let col = range.firstCol; col <= range.lastCol; col += 1) addTile(col, row);
+    }
+    return tiles;
+  }
+
+  const maxRadius = Math.max(
+    range.centerCol - range.firstCol,
+    range.lastCol - range.centerCol,
+    range.centerRow - range.firstRow,
+    range.lastRow - range.centerRow
+  );
+  for (let radius = 0; radius <= maxRadius && tiles.length < MAX_VISIBLE_TILES; radius += 1) {
+    const firstRow = Math.max(range.firstRow, range.centerRow - radius);
+    const lastRow = Math.min(range.lastRow, range.centerRow + radius);
+    const firstCol = Math.max(range.firstCol, range.centerCol - radius);
+    const lastCol = Math.min(range.lastCol, range.centerCol + radius);
+    for (let row = firstRow; row <= lastRow && tiles.length < MAX_VISIBLE_TILES; row += 1) {
+      for (let col = firstCol; col <= lastCol && tiles.length < MAX_VISIBLE_TILES; col += 1) {
+        if (radius === 0 || row === firstRow || row === lastRow || col === firstCol || col === lastCol) {
+          addTile(col, row);
+        }
+      }
+    }
+  }
+  return tiles;
+}
+
+function chooseOverviewLevel(kind) {
+  const { source, view } = mapParts(kind);
+  const levels = source.levels || [];
+  if (!levels.length) return null;
+  let index = levels.reduce((best, level, candidate) => {
+    const distance = Math.abs(Math.log(Math.max(level.factor * view.scale, 0.000001)));
+    const bestDistance = Math.abs(Math.log(Math.max(levels[best].factor * view.scale, 0.000001)));
+    return distance < bestDistance ? candidate : best;
+  }, 0);
+  while (index < levels.length - 1 && visibleTileCount(kind, levels[index]) > MAX_VISIBLE_TILES) index += 1;
+  return levels[index];
+}
+
+function refreshGeoTiffTiles(kind) {
+  const { source, content } = mapParts(kind);
+  if (!isGeoTiffSource(source) || !content) return;
+  const level = chooseOverviewLevel(kind);
+  if (!level) return;
+  const batchId = (source.tileBatchId || 0) + 1;
+  source.tileBatchId = batchId;
+  content.dataset.rasterLevel = String(level.level);
+  content.dataset.rasterFactor = String(level.factor);
+  const wantedTiles = visibleTilesForLevel(kind, level);
+  const wantedKeys = new Set(wantedTiles.map(({ col, row }) => `${level.level}:${col}:${row}`));
+  const levelChanged = source.currentLevel !== null && source.currentLevel !== level.level;
+  const pruneStaleTiles = () => {
+    for (const [key, node] of source.tileNodes) {
+      if (!wantedKeys.has(key)) {
+        node.remove();
+        source.tileNodes.delete(key);
+      }
+    }
+  };
+
+  // Keep the previous overview level visible until every replacement tile is ready.
+  if (!levelChanged) pruneStaleTiles();
+
+  const overlay = content.querySelector(".vector-layer, .saved-region, .selection-box");
+  let pending = 0;
+  let failed = false;
+  const finishBatch = () => {
+    if (pending || failed || source.tileBatchId !== batchId) return;
+    pruneStaleTiles();
+    source.currentLevel = level.level;
+  };
+  for (const { col, row } of wantedTiles) {
+    const key = `${level.level}:${col}:${row}`;
+    const existing = source.tileNodes.get(key);
+    if (existing) {
+      if (!existing.classList.contains("tile-ready")) {
+        pending += 1;
+        let settled = false;
+        const settleExisting = (success) => {
+          if (settled) return;
+          settled = true;
+          pending -= 1;
+          if (success) {
+            existing.classList.add("tile-ready");
+          } else {
+            failed = true;
+            source.tileNodes.delete(key);
+            existing.remove();
+          }
+          finishBatch();
+        };
+        existing.addEventListener("load", () => settleExisting(true), { once: true });
+        existing.addEventListener("error", () => settleExisting(false), { once: true });
+        if (existing.complete) queueMicrotask(() => settleExisting(existing.naturalWidth > 0));
+      }
+      continue;
+    }
+    const left = col * TILE_SIZE * level.factor;
+    const top = row * TILE_SIZE * level.factor;
+    const width = Math.min(TILE_SIZE, level.width - col * TILE_SIZE) * level.factor;
+    const height = Math.min(TILE_SIZE, level.height - row * TILE_SIZE) * level.factor;
+    if (width <= 0 || height <= 0 || left >= source.width || top >= source.height) continue;
+    const img = document.createElement("img");
+    img.className = "tile-img geotiff-tile";
+    img.loading = "eager";
+    img.decoding = "async";
+    img.alt = "";
+    Object.assign(img.style, {
+      left: `${left}px`,
+      top: `${top}px`,
+      width: `${Math.min(width, source.width - left)}px`,
+      height: `${Math.min(height, source.height - top)}px`
+    });
+    pending += 1;
+    let settled = false;
+    const settle = (success) => {
+      if (settled) return;
+      settled = true;
+      pending -= 1;
+      if (success) {
+        img.classList.add("tile-ready");
+      } else {
+        failed = true;
+        img.classList.add("tile-error");
+        source.tileNodes.delete(key);
+        img.remove();
+      }
+      finishBatch();
+    };
+    img.addEventListener("load", () => settle(true), { once: true });
+    img.addEventListener("error", () => settle(false), { once: true });
+    content.insertBefore(img, overlay);
+    source.tileNodes.set(key, img);
+    img.src = `/api/map/${kind}/tile/${encodeURIComponent(level.level)}/${col}/${row}.png?v=${encodeURIComponent(source.fingerprint)}`;
+    if (img.complete) queueMicrotask(() => settle(img.naturalWidth > 0));
+  }
+  finishBatch();
+}
+
+function labelForMap(kind) {
+  return kind === "dsm" ? "DSM" : "DOM";
 }
 
 function normalizeBounds(input) {
@@ -273,40 +631,30 @@ function normalizeBounds(input) {
   };
 }
 
-function buildTileSet(files) {
-  const groups = new Map();
-  for (const file of files) {
-    const rel = file.webkitRelativePath || file.name;
-    const match = rel.match(/(?:^|\/)(\d+)\/(\d+)\/(\d+)\.(png|jpe?g|webp)$/i);
-    if (!match) continue;
-    const z = Number(match[1]);
-    const x = Number(match[2]);
-    const y = Number(match[3]);
-    if (!groups.has(z)) groups.set(z, []);
-    groups.get(z).push({ z, x, y, url: URL.createObjectURL(file) });
-  }
-  if (!groups.size) return null;
-  const [z, tiles] = Array.from(groups.entries()).sort((a, b) => b[1].length - a[1].length)[0];
-  const xs = tiles.map((tile) => tile.x);
-  const ys = tiles.map((tile) => tile.y);
-  return { z, tiles, minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) };
-}
-
 function renderTiles(tileSet) {
   const width = (tileSet.maxX - tileSet.minX + 1) * TILE_SIZE;
   const height = (tileSet.maxY - tileSet.minY + 1) * TILE_SIZE;
   state.source = {
     type: "tiles",
+    fingerprint: tileSet.fingerprint || ONLINE_TILE_SOURCE.fingerprint,
     width,
     height,
     z: tileSet.z,
     minX: tileSet.minX,
     minY: tileSet.minY,
     provider: tileSet.provider || "local",
-    bounds: null
+    bounds: null,
+    loaded: true
   };
+  handleMapSourceChanged("dom");
+  if (elements.domMapMeta) {
+    elements.domMapMeta.textContent = tileSet.provider
+      ? `${tileSet.provider} · z${tileSet.z}`
+      : `LOCAL TILES · z${tileSet.z}`;
+  }
 
   elements.mapContent.innerHTML = "";
+  elements.mapContent.dataset.sourceMode = "online";
   elements.mapContent.style.width = `${width}px`;
   elements.mapContent.style.height = `${height}px`;
   let loaded = 0;
@@ -319,6 +667,8 @@ function renderTiles(tileSet) {
   for (const tile of tileSet.tiles) {
     const img = document.createElement("img");
     img.className = "tile-img";
+    img.loading = "lazy";
+    img.decoding = "async";
     img.src = tile.url;
     img.alt = "";
     img.style.left = `${(tile.x - tileSet.minX) * TILE_SIZE}px`;
@@ -339,78 +689,151 @@ function renderTiles(tileSet) {
   fitView();
 }
 
-async function renderSingleImage(file, bounds) {
-  const url = URL.createObjectURL(file);
-  const size = await readImageSize(url);
-  state.source = {
-    type: "image",
-    width: size.width,
-    height: size.height,
-    bounds,
-    z: null,
-    minX: 0,
-    minY: 0
-  };
-  elements.mapContent.innerHTML = "";
-  elements.mapContent.style.width = `${size.width}px`;
-  elements.mapContent.style.height = `${size.height}px`;
-  const img = document.createElement("img");
-  img.className = "map-image";
-  img.src = url;
-  img.alt = "";
-  img.style.width = `${size.width}px`;
-  img.style.height = `${size.height}px`;
-  elements.mapContent.append(img);
-  ensureVectorLayer();
-  renderSavedRegions();
-  fitView();
-}
-
-function readImageSize(src) {
-  return new Promise((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
-    image.onerror = reject;
-    image.src = src;
-  });
-}
-
 function ensureVectorLayer() {
-  let layer = elements.mapContent.querySelector("#vectorLayer");
+  return ensureMapVectorLayer("dom");
+}
+
+function ensureDsmVectorLayer() {
+  return ensureMapVectorLayer("dsm");
+}
+
+function ensureMapVectorLayer(kind) {
+  const isDsm = kind === "dsm";
+  const content = isDsm ? elements.dsmContent : elements.mapContent;
+  const source = isDsm ? state.dsmSource : state.source;
+  if (!content) return null;
+  const id = isDsm ? "dsmVectorLayer" : "vectorLayer";
+  let layer = content.querySelector(`#${id}`);
   if (!layer) {
     layer = document.createElementNS(SVG_NS, "svg");
-    layer.id = "vectorLayer";
+    layer.id = id;
     layer.classList.add("vector-layer");
-    elements.mapContent.append(layer);
+    content.append(layer);
   }
-  layer.setAttribute("viewBox", `0 0 ${state.source.width} ${state.source.height}`);
-  elements.vectorLayer = layer;
+  layer.setAttribute("viewBox", `0 0 ${source.width} ${source.height}`);
+  if (isDsm) elements.dsmVectorLayer = layer;
+  else elements.vectorLayer = layer;
+  renderTrajectoryOnMap(kind, layer);
   return layer;
 }
 
 function setMapReady(label) {
-  elements.mapState.classList.remove("muted");
-  elements.cursorReadout.textContent = label;
+  elements.mapState?.classList.remove("muted");
+  if (elements.cursorReadout) {
+    elements.cursorReadout.textContent = label;
+    elements.cursorReadout.classList.remove("error");
+  }
 }
 
-function fitView() {
-  const rect = elements.mapViewport.getBoundingClientRect();
-  if (!rect.width || !rect.height) return;
-  const scale = Math.min(rect.width / state.source.width, rect.height / state.source.height) * 0.94;
-  state.view.scale = clamp(scale, 0.08, 4);
-  state.view.x = (rect.width - state.source.width * state.view.scale) / 2;
-  state.view.y = (rect.height - state.source.height * state.view.scale) / 2;
-  applyTransform();
+function mapParts(kind) {
+  const isDsm = kind === "dsm";
+  return {
+    source: isDsm ? state.dsmSource : state.source,
+    view: isDsm ? state.dsmView : state.view,
+    viewport: isDsm ? elements.dsmViewport : elements.mapViewport,
+    content: isDsm ? elements.dsmContent : elements.mapContent
+  };
 }
 
-function applyTransform() {
-  elements.mapContent.style.transform = `translate(${state.view.x}px, ${state.view.y}px) scale(${state.view.scale})`;
+function getFitScale(kind) {
+  const { source, viewport } = mapParts(kind);
+  const rect = viewport?.getBoundingClientRect();
+  if (!rect?.width || !rect.height || !source.width || !source.height) return 1;
+  return clamp(Math.min(rect.width / source.width, rect.height / source.height) * 0.94, MIN_MAP_SCALE, MAX_MAP_SCALE);
+}
+
+function fitView(kind = "dom") {
+  const { source, view, viewport } = mapParts(kind);
+  const rect = viewport?.getBoundingClientRect();
+  if (!rect?.width || !rect.height || !source.width || !source.height) return;
+  view.scale = getFitScale(kind);
+  view.x = (rect.width - source.width * view.scale) / 2;
+  view.y = (rect.height - source.height * view.scale) / 2;
+  applyTransform(kind);
+}
+
+function applyTransform(kind = "dom") {
+  const { content, view } = mapParts(kind);
+  if (!content) return;
+  content.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
+  content.classList.toggle("native-resolution", view.scale >= 0.999);
+  updateZoomIndicator(kind);
+  scheduleTileRefresh(kind);
+  scheduleTrajectoryUpdate();
+}
+
+function updateZoomIndicator(kind) {
+  const value = kind === "dsm" ? elements.dsmZoomValue : elements.domZoomValue;
+  const button = kind === "dsm" ? elements.dsmNativeButton : elements.domNativeButton;
+  const scale = mapParts(kind).view.scale;
+  if (value) value.textContent = scale >= 0.1 ? `${Math.round(scale * 100)}%` : `${(scale * 100).toFixed(1)}%`;
+  button?.classList.toggle("active", Math.abs(scale - 1) < 0.001);
+}
+
+function setScaleAtPoint(kind, nextScale, anchor = null) {
+  const { viewport, view } = mapParts(kind);
+  const rect = viewport?.getBoundingClientRect();
+  if (!rect?.width || !rect.height) return;
+  const point = anchor || { x: rect.width / 2, y: rect.height / 2 };
+  const contentPoint = {
+    x: (point.x - view.x) / view.scale,
+    y: (point.y - view.y) / view.scale
+  };
+  view.scale = clamp(nextScale, MIN_MAP_SCALE, MAX_MAP_SCALE);
+  view.x = point.x - contentPoint.x * view.scale;
+  view.y = point.y - contentPoint.y * view.scale;
+  applyTransform(kind);
+}
+
+function zoomBy(kind, factor) {
+  const { view } = mapParts(kind);
+  setScaleAtPoint(kind, view.scale * factor);
+}
+
+function setNativeScale(kind) {
+  setScaleAtPoint(kind, 1);
+  addLog(`${labelForMap(kind)} 切换到 1:1 原始分辨率`);
+}
+
+function mapContentCenter(kind) {
+  const { viewport, view } = mapParts(kind);
+  const rect = viewport?.getBoundingClientRect();
+  if (!rect?.width || !rect.height) return null;
+  return {
+    x: (rect.width / 2 - view.x) / view.scale,
+    y: (rect.height / 2 - view.y) / view.scale
+  };
+}
+
+function toggleMapFocus(kind) {
+  if (!elements.mapWorkspace) return;
+  const centers = { dom: mapContentCenter("dom"), dsm: mapContentCenter("dsm") };
+  state.focusedMap = state.focusedMap === kind ? null : kind;
+  elements.mapWorkspace.classList.toggle("focus-dom", state.focusedMap === "dom");
+  elements.mapWorkspace.classList.toggle("focus-dsm", state.focusedMap === "dsm");
+  for (const [mapKind, button] of [["dom", elements.domExpandButton], ["dsm", elements.dsmExpandButton]]) {
+    const active = state.focusedMap === mapKind;
+    button?.classList.toggle("active", active);
+    button?.setAttribute("aria-pressed", String(active));
+    const label = button?.querySelector("b");
+    if (label) label.textContent = active ? "双图" : "单图";
+  }
+  requestAnimationFrame(() => {
+    for (const mapKind of ["dom", "dsm"]) {
+      const center = centers[mapKind];
+      const { viewport, view } = mapParts(mapKind);
+      const rect = viewport?.getBoundingClientRect();
+      if (!center || !rect?.width || !rect.height) continue;
+      view.x = rect.width / 2 - center.x * view.scale;
+      view.y = rect.height / 2 - center.y * view.scale;
+      applyTransform(mapKind);
+    }
+  });
 }
 
 function onPointerDown(event) {
   if (event.button !== 0) return;
   const point = clampContentPoint(toContentPoint(event));
-
   if (state.drawMode === "polygon") {
     event.preventDefault();
     if (event.detail === 1) {
@@ -421,29 +844,23 @@ function onPointerDown(event) {
     return;
   }
 
-  elements.mapViewport.classList.add("dragging");
+  elements.mapViewport?.classList.add("dragging");
   if (state.drawMode === "rectangle") {
     state.drag = { type: "select", start: point, current: point };
     state.selectionEl?.remove();
     state.selectionEl = document.createElement("div");
     state.selectionEl.className = "selection-box";
     state.selectionEl.dataset.name = "NEW REGION";
-    elements.mapContent.append(state.selectionEl);
+    elements.mapContent?.append(state.selectionEl);
     updateSelectionEl();
   } else {
-    state.drag = {
-      type: "pan",
-      startClient: { x: event.clientX, y: event.clientY },
-      startView: { ...state.view }
-    };
+    state.drag = { type: "pan", startClient: { x: event.clientX, y: event.clientY }, startView: { ...state.view } };
   }
 }
 
 function onPointerMove(event) {
   const point = clampContentPoint(toContentPoint(event));
-  const coord = contentToLatLon(point.x, point.y);
-  elements.cursorReadout.textContent = `${coord.lat.toFixed(6)}, ${coord.lon.toFixed(6)}`;
-
+  queryDomPointerCoordinates(point);
   if (state.drawMode === "polygon" && state.polygonPoints.length) {
     state.polygonCursor = point;
     renderVectorLayer();
@@ -452,22 +869,41 @@ function onPointerMove(event) {
   if (state.drag.type === "select") {
     state.drag.current = point;
     updateSelectionEl();
-  } else if (state.drag.type === "pan") {
+  } else {
     state.view.x = state.drag.startView.x + event.clientX - state.drag.startClient.x;
     state.view.y = state.drag.startView.y + event.clientY - state.drag.startClient.y;
-    applyTransform();
+    applyTransform("dom");
   }
 }
 
+function onDsmPointerDown(event) {
+  if (event.button !== 0) return;
+  elements.dsmViewport?.classList.add("dragging");
+  state.dsmDrag = {
+    startClient: { x: event.clientX, y: event.clientY },
+    startView: { ...state.dsmView }
+  };
+}
+
+function onDsmPointerMove(event) {
+  const point = clampContentPointForSource(toContentPointForMap(event, "dsm"), state.dsmSource);
+  queryDsmPointerElevation(point.x, point.y);
+  if (!state.dsmDrag) return;
+  state.dsmView.x = state.dsmDrag.startView.x + event.clientX - state.dsmDrag.startClient.x;
+  state.dsmView.y = state.dsmDrag.startView.y + event.clientY - state.dsmDrag.startClient.y;
+  applyTransform("dsm");
+}
+
 async function onPointerUp() {
-  elements.mapViewport.classList.remove("dragging");
+  elements.mapViewport?.classList.remove("dragging");
+  elements.dsmViewport?.classList.remove("dragging");
+  state.dsmDrag = null;
   if (!state.drag) return;
   if (state.drag.type === "select") {
     const box = getSelectionBox();
     state.drag = null;
-    if (box && box.width >= 12 && box.height >= 12) {
-      await createRegionFromBox(box);
-    } else {
+    if (box && box.width >= 12 && box.height >= 12) await createRegionFromBox(box);
+    else {
       state.selectionEl?.remove();
       state.selectionEl = null;
     }
@@ -483,19 +919,21 @@ function onDoubleClick(event) {
   finishPolygon();
 }
 
-function onWheel(event) {
+function zoomMap(event, kind) {
   event.preventDefault();
-  const rect = elements.mapViewport.getBoundingClientRect();
+  const { viewport, view } = mapParts(kind);
+  const rect = viewport?.getBoundingClientRect();
+  if (!rect) return;
   const mouse = { x: event.clientX - rect.left, y: event.clientY - rect.top };
-  const before = {
-    x: (mouse.x - state.view.x) / state.view.scale,
-    y: (mouse.y - state.view.y) / state.view.scale
-  };
-  const factor = event.deltaY > 0 ? 0.9 : 1.1;
-  state.view.scale = clamp(state.view.scale * factor, 0.08, 8);
-  state.view.x = mouse.x - before.x * state.view.scale;
-  state.view.y = mouse.y - before.y * state.view.scale;
-  applyTransform();
+  setScaleAtPoint(kind, view.scale * (event.deltaY > 0 ? 0.88 : 1.14), mouse);
+}
+
+function onWheel(event) {
+  zoomMap(event, "dom");
+}
+
+function onDsmWheel(event) {
+  zoomMap(event, "dsm");
 }
 
 function onContextMenu(event) {
@@ -529,22 +967,30 @@ function getSelectionBox() {
 }
 
 async function createRegionFromBox(box) {
-  const topLeft = contentToLatLon(box.left, box.top);
-  const bottomRight = contentToLatLon(box.left + box.width, box.top + box.height);
-  const region = buildRegionBase("rectangle");
-  region.pixelBox = {
-    x: round(box.left, 2),
-    y: round(box.top, 2),
-    width: round(box.width, 2),
-    height: round(box.height, 2)
-  };
-  region.bbox = {
-    topLeft: { lat: round(topLeft.lat, 7), lon: round(topLeft.lon, 7) },
-    bottomRight: { lat: round(bottomRight.lat, 7), lon: round(bottomRight.lon, 7) }
-  };
+  const corners = [
+    { x: box.left, y: box.top },
+    { x: box.left + box.width, y: box.top },
+    { x: box.left + box.width, y: box.top + box.height },
+    { x: box.left, y: box.top + box.height }
+  ];
   state.selectionEl?.remove();
   state.selectionEl = null;
-  await saveRegion(region);
+  try {
+    const coordinates = await pixelsToGeographic("dom", corners);
+    const region = buildRegionBase("rectangle");
+    region.pixelBox = {
+      x: round(box.left, 2),
+      y: round(box.top, 2),
+      width: round(box.width, 2),
+      height: round(box.height, 2)
+    };
+    region.bbox = geographicBounds(coordinates);
+    await saveRegion(region);
+  } catch (error) {
+    if (error.name !== "AbortError" && error.name !== "StaleMapError") {
+      addLog(`区域坐标转换失败: ${error.message}`);
+    }
+  }
 }
 
 async function finishPolygon() {
@@ -553,22 +999,30 @@ async function finishPolygon() {
     addLog("多边形至少需要 3 个顶点");
     return;
   }
-  const coordinates = points.map((point) => {
-    const coord = contentToLatLon(point.x, point.y);
-    return { lat: round(coord.lat, 7), lon: round(coord.lon, 7) };
-  });
-  const lats = coordinates.map((point) => point.lat);
-  const lons = coordinates.map((point) => point.lon);
-  const region = buildRegionBase("polygon");
-  region.pixelPoints = points.map((point) => ({ x: round(point.x, 2), y: round(point.y, 2) }));
-  region.polygon = coordinates;
-  region.bbox = {
-    topLeft: { lat: Math.max(...lats), lon: Math.min(...lons) },
-    bottomRight: { lat: Math.min(...lats), lon: Math.max(...lons) }
-  };
   state.polygonPoints = [];
   state.polygonCursor = null;
-  await saveRegion(region);
+  renderVectorLayer();
+  try {
+    const coordinates = await pixelsToGeographic("dom", points);
+    const region = buildRegionBase("polygon");
+    region.pixelPoints = points.map((point) => ({ x: round(point.x, 2), y: round(point.y, 2) }));
+    region.polygon = coordinates.map((point) => ({ lat: round(point.lat, 7), lon: round(point.lon, 7) }));
+    region.bbox = geographicBounds(coordinates);
+    await saveRegion(region);
+  } catch (error) {
+    if (error.name !== "AbortError" && error.name !== "StaleMapError") {
+      addLog(`多边形坐标转换失败: ${error.message}`);
+    }
+  }
+}
+
+function geographicBounds(coordinates) {
+  const lats = coordinates.map((point) => Number(point.lat));
+  const lons = coordinates.map((point) => Number(point.lon));
+  return {
+    topLeft: { lat: round(Math.max(...lats), 7), lon: round(Math.min(...lons), 7) },
+    bottomRight: { lat: round(Math.min(...lats), 7), lon: round(Math.max(...lons), 7) }
+  };
 }
 
 function buildRegionBase(shape) {
@@ -577,6 +1031,7 @@ function buildRegionBase(shape) {
     name: `AREA-${String(state.regions.length + 1).padStart(3, "0")}`,
     shape,
     sourceType: state.source.type,
+    mapFingerprint: state.source.fingerprint,
     createdAt: new Date().toISOString()
   };
 }
@@ -600,12 +1055,21 @@ async function saveRegion(region) {
   }
 }
 
+function regionMatchesSource(region, source) {
+  return Boolean(
+    region?.sourceType === source?.type
+    && region.mapFingerprint
+    && source.fingerprint
+    && region.mapFingerprint === source.fingerprint
+  );
+}
+
 function renderSavedRegions() {
   elements.mapContent.querySelectorAll(".saved-region").forEach((node) => node.remove());
   ensureVectorLayer();
   renderVectorLayer();
   for (const region of state.regions) {
-    if (!region.pixelBox || region.sourceType !== state.source.type) continue;
+    if (!region.pixelBox || !regionMatchesSource(region, state.source)) continue;
     const el = document.createElement("div");
     el.className = "saved-region";
     if (region.id === state.selectedRegionId) el.classList.add("selected");
@@ -622,7 +1086,7 @@ function renderVectorLayer() {
   const layer = ensureVectorLayer();
   layer.innerHTML = "";
   for (const region of state.regions) {
-    if (!region.pixelPoints || region.sourceType !== state.source.type) continue;
+    if (!region.pixelPoints || !regionMatchesSource(region, state.source)) continue;
     const polygon = document.createElementNS(SVG_NS, "polygon");
     polygon.setAttribute("points", region.pixelPoints.map((point) => `${point.x},${point.y}`).join(" "));
     polygon.setAttribute("class", region.id === state.selectedRegionId ? "region-poly region-poly-selected" : "region-poly");
@@ -661,46 +1125,198 @@ function renderVectorLayer() {
     }
   }
 
-  renderTrajectoryOnMap(layer);
+  renderTrajectoryOnMap("dom", layer);
 }
 
-function renderTrajectoryOnMap(layer) {
-  const history = state.telemetryHistory;
-  const points = history.filter((item) => Number.isFinite(item.lat) && Number.isFinite(item.lon));
-  if (points.length < 2) return;
+function renderTrajectoryOnMap(kind, layer) {
+  if (!layer) return;
+  let nodes = trajectoryNodes[kind];
+  if (!nodes) {
+    nodes = {
+      trail: document.createElementNS(SVG_NS, "polyline"),
+      position: document.createElementNS(SVG_NS, "circle"),
+      ring: document.createElementNS(SVG_NS, "circle"),
+      start: document.createElementNS(SVG_NS, "circle")
+    };
+    nodes.trail.setAttribute("class", "trajectory-trail");
+    nodes.position.setAttribute("class", "trajectory-pos");
+    nodes.ring.setAttribute("class", "trajectory-ring");
+    nodes.start.setAttribute("class", "trajectory-start");
+    trajectoryNodes[kind] = nodes;
+  }
+  layer.append(nodes.trail, nodes.position, nodes.ring, nodes.start);
+  updateTrajectoryElements(kind);
+}
 
-  const pixelPoints = points.map((item) => latLonToContent(item.lat, item.lon));
-  const pointsStr = pixelPoints.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
+function updateTrajectoryElements(kind) {
+  const nodes = trajectoryNodes[kind];
+  if (!nodes) return;
+  const source = kind === "dsm" ? state.dsmSource : state.source;
+  const view = kind === "dsm" ? state.dsmView : state.view;
+  const cache = trajectoryProjection[kind];
+  const pixelPoints = cache.fingerprint === source.fingerprint
+    ? state.telemetryHistory.map((item) => cache.pixels.get(item.id)).filter(Boolean)
+    : [];
+  if (!pixelPoints.length) {
+    nodes.trail.setAttribute("points", "");
+    nodes.position.setAttribute("r", "0");
+    nodes.ring.setAttribute("r", "0");
+    nodes.start.setAttribute("r", "0");
+    return;
+  }
 
-  const trail = document.createElementNS(SVG_NS, "polyline");
-  trail.setAttribute("points", pointsStr);
-  trail.setAttribute("class", "trajectory-trail");
-  layer.append(trail);
-
-  const lastPoint = pixelPoints[pixelPoints.length - 1];
-  const posMarker = document.createElementNS(SVG_NS, "circle");
-  posMarker.setAttribute("cx", lastPoint.x.toFixed(1));
-  posMarker.setAttribute("cy", lastPoint.y.toFixed(1));
-  posMarker.setAttribute("r", 5 / Math.max(state.view.scale, 0.15));
-  posMarker.setAttribute("class", "trajectory-pos");
-  layer.append(posMarker);
-
-  const posRing = document.createElementNS(SVG_NS, "circle");
-  posRing.setAttribute("cx", lastPoint.x.toFixed(1));
-  posRing.setAttribute("cy", lastPoint.y.toFixed(1));
-  posRing.setAttribute("r", 12 / Math.max(state.view.scale, 0.15));
-  posRing.setAttribute("class", "trajectory-ring");
-  layer.append(posRing);
+  nodes.trail.setAttribute("points", pixelPoints.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" "));
+  const last = pixelPoints[pixelPoints.length - 1];
+  const scale = Math.max(view.scale, 0.02);
+  nodes.position.setAttribute("cx", last.x.toFixed(1));
+  nodes.position.setAttribute("cy", last.y.toFixed(1));
+  nodes.position.setAttribute("r", (5 / scale).toFixed(1));
+  nodes.ring.setAttribute("cx", last.x.toFixed(1));
+  nodes.ring.setAttribute("cy", last.y.toFixed(1));
+  nodes.ring.setAttribute("r", (12 / scale).toFixed(1));
 
   if (pixelPoints.length > 3) {
-    const firstPoint = pixelPoints[0];
-    const startMark = document.createElementNS(SVG_NS, "circle");
-    startMark.setAttribute("cx", firstPoint.x.toFixed(1));
-    startMark.setAttribute("cy", firstPoint.y.toFixed(1));
-    startMark.setAttribute("r", 3.5 / Math.max(state.view.scale, 0.15));
-    startMark.setAttribute("class", "trajectory-start");
-    layer.append(startMark);
+    const first = pixelPoints[0];
+    nodes.start.setAttribute("cx", first.x.toFixed(1));
+    nodes.start.setAttribute("cy", first.y.toFixed(1));
+    nodes.start.setAttribute("r", (3.5 / scale).toFixed(1));
+  } else {
+    nodes.start.setAttribute("r", "0");
   }
+}
+
+function handleMapSourceChanged(kind) {
+  if (kind === "dom") {
+    window.clearTimeout(domPointerTimer);
+    domPointerController?.abort();
+    domPointerRequestId += 1;
+  } else {
+    window.clearTimeout(dsmPointerTimer);
+    dsmPointerController?.abort();
+    dsmPointerRequestId += 1;
+    window.clearTimeout(telemetryElevationTimer);
+    telemetryElevationController?.abort();
+    telemetryElevationRequestId += 1;
+  }
+  resetTrajectoryProjection(kind);
+}
+
+function resetTrajectoryProjection(kind) {
+  const source = mapParts(kind).source;
+  const cache = trajectoryProjection[kind];
+  window.clearTimeout(cache.timer);
+  cache.controller?.abort();
+  cache.requestId += 1;
+  cache.fingerprint = source.fingerprint;
+  cache.pixels.clear();
+  cache.pending.clear();
+  cache.timer = 0;
+  cache.controller = null;
+  if (!source.loaded) {
+    scheduleTrajectoryUpdate();
+    return;
+  }
+  if (isGeoTiffSource(source)) {
+    for (const sample of state.telemetryHistory) cache.pending.add(sample.id);
+    scheduleProjectionFlush(kind, 0);
+  } else {
+    for (const sample of state.telemetryHistory) {
+      cache.pixels.set(sample.id, latLonToContentForSource(source, sample.lat, sample.lon));
+    }
+    scheduleTrajectoryUpdate();
+  }
+}
+
+function cacheTelemetryProjection(kind, sample) {
+  const source = mapParts(kind).source;
+  const cache = trajectoryProjection[kind];
+  if (!source.loaded || cache.fingerprint !== source.fingerprint) return;
+  if (isGeoTiffSource(source)) {
+    cache.pending.add(sample.id);
+    scheduleProjectionFlush(kind, 90);
+  } else {
+    cache.pixels.set(sample.id, latLonToContentForSource(source, sample.lat, sample.lon));
+    scheduleTrajectoryUpdate();
+  }
+}
+
+function scheduleProjectionFlush(kind, delay) {
+  const cache = trajectoryProjection[kind];
+  if (cache.timer || cache.controller || !cache.pending.size) return;
+  cache.timer = window.setTimeout(() => {
+    cache.timer = 0;
+    flushTrajectoryProjection(kind);
+  }, delay);
+}
+
+async function flushTrajectoryProjection(kind) {
+  const cache = trajectoryProjection[kind];
+  const source = mapParts(kind).source;
+  if (cache.controller || !cache.pending.size || !isGeoTiffSource(source)) return;
+  const samples = state.telemetryHistory.filter((sample) => cache.pending.has(sample.id));
+  samples.forEach((sample) => cache.pending.delete(sample.id));
+  if (!samples.length) return;
+  const fingerprint = source.fingerprint;
+  const requestId = ++cache.requestId;
+  cache.controller = new AbortController();
+  try {
+    const points = await requestCoordinateBatch(
+      kind,
+      "wgs84_to_pixel",
+      samples.map((sample) => ({ lat: sample.lat, lon: sample.lon })),
+      fingerprint,
+      cache.controller.signal
+    );
+    if (requestId !== cache.requestId || cache.fingerprint !== fingerprint) return;
+    points.forEach((point, index) => {
+      const x = toFiniteNumber(point.x);
+      const y = toFiniteNumber(point.y);
+      if (x !== null && y !== null) cache.pixels.set(samples[index].id, { x, y });
+    });
+    scheduleTrajectoryUpdate();
+  } catch (error) {
+    if (error.name !== "AbortError" && error.name !== "StaleMapError") {
+      console.warn(`${labelForMap(kind)} trajectory projection failed`, error);
+    }
+  } finally {
+    if (requestId === cache.requestId) cache.controller = null;
+    if (cache.pending.size) scheduleProjectionFlush(kind, 180);
+  }
+}
+
+async function requestCoordinateBatch(kind, direction, points, expectedFingerprint, signal) {
+  const source = mapParts(kind).source;
+  if (!isGeoTiffSource(source)) {
+    return direction === "pixel_to_wgs84"
+      ? points.map((point) => contentToLatLonForSource(source, point.x, point.y))
+      : points.map((point) => latLonToContentForSource(source, point.lat, point.lon));
+  }
+  if (!points.length) return [];
+  const response = await fetch(`/api/map/${kind}/coordinates`, {
+    method: "POST",
+    signal,
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({ direction, points })
+  });
+  const data = await readApiResponse(response);
+  const currentSource = mapParts(kind).source;
+  if (
+    currentSource.fingerprint !== expectedFingerprint
+    || String(data.fingerprint || "") !== String(expectedFingerprint)
+  ) {
+    const error = new Error("地图数据已切换");
+    error.name = "StaleMapError";
+    throw error;
+  }
+  if (!Array.isArray(data.points) || data.points.length !== points.length) {
+    throw new Error("坐标转换返回的数据数量无效");
+  }
+  return data.points;
+}
+
+function pixelsToGeographic(kind, points) {
+  const source = mapParts(kind).source;
+  return requestCoordinateBatch(kind, "pixel_to_wgs84", points, source.fingerprint);
 }
 
 function renderRegionSelect() {
@@ -964,70 +1580,90 @@ async function loadRegions() {
 }
 
 function connectEvents() {
-  const events = new EventSource("/events");
-  events.addEventListener("open", () => {
-    elements.backendState.classList.remove("muted");
-    addLog("SSE 已连接");
-  });
-  events.addEventListener("error", () => {
-    elements.backendState.classList.add("muted");
-    elements.gatewayState.classList.add("muted");
-  });
-  events.addEventListener("hello", (event) => {
-    const data = JSON.parse(event.data);
-    state.regions = Array.isArray(data.regions) ? data.regions : state.regions;
-    state.publishingStatus = data.publishing || null;
-    state.publishing = Boolean(data.publishing?.active);
-    state.localizationStatus = data.localization || null;
-    state.localizationRunning = Boolean(data.localization?.active);
-    renderRegionSelect();
-    renderSavedRegions();
-    updatePublishUi(state.publishingStatus);
-    updateLocalizationUi(state.localizationStatus);
-    if (data.latestTelemetry) updateTelemetry(data.latestTelemetry);
-    else if (data.latestTopic?.payload?.lat != null && data.latestTopic?.payload?.lon != null) {
-      updateTelemetry({ topic: data.latestTopic.name, ...data.latestTopic.payload });
-    }
-    if (data.system) renderSystemStatus(data.system);
-  });
-  events.addEventListener("telemetry", (event) => updateTelemetry(JSON.parse(event.data)));
-  events.addEventListener("topic", (event) => {
-    const data = JSON.parse(event.data);
-    elements.topicName.textContent = data.name;
-    addLog(`收到话题: ${data.name}`);
-  });
-  events.addEventListener("publish", (event) => {
-    const data = JSON.parse(event.data);
-    addLog(`发布 ${data.flag || data.field}: ${data.region?.name || "region"}`);
-  });
-  events.addEventListener("publish-state", (event) => {
-    const data = JSON.parse(event.data);
-    state.publishingStatus = data;
-    state.publishing = Boolean(data?.active);
-    updatePublishUi(data);
-  });
-  events.addEventListener("localization-state", (event) => {
-    const data = JSON.parse(event.data);
-    state.localizationStatus = data;
-    state.localizationRunning = Boolean(data?.active);
-    updateLocalizationUi(data);
-  });
-  events.addEventListener("system-status", (event) => {
-    renderSystemStatus(JSON.parse(event.data));
-  });
-  events.addEventListener("regions", (event) => {
-    const data = JSON.parse(event.data);
-    state.regions = data.regions || [];
-    renderRegionSelect();
-    renderSavedRegions();
-    updateRegionReadout();
-  });
-  events.addEventListener("agent", () => addLog("Agent 结果已广播"));
+  let retryDelay = 1000;
+  let eventSource = null;
+
+  function connect() {
+    if (eventSource) { try { eventSource.close(); } catch {} }
+    eventSource = new EventSource("/events");
+
+    eventSource.addEventListener("open", () => {
+      retryDelay = 1000;
+      elements.backendState.classList.remove("muted");
+      addLog("SSE 已连接");
+    });
+
+    eventSource.addEventListener("error", () => {
+      elements.backendState.classList.add("muted");
+      elements.gatewayState.classList.add("muted");
+      try { eventSource.close(); } catch {}
+      addLog(`SSE 断开，${Math.round(retryDelay / 1000)}s 后重连`);
+      setTimeout(() => {
+        connect();
+        loadSystemStatus();
+      }, retryDelay);
+      retryDelay = Math.min(retryDelay * 1.5, 15000);
+    });
+
+    eventSource.addEventListener("hello", (event) => {
+      const data = JSON.parse(event.data);
+      state.regions = Array.isArray(data.regions) ? data.regions : state.regions;
+      state.publishingStatus = data.publishing || null;
+      state.publishing = Boolean(data.publishing?.active);
+      state.localizationStatus = data.localization || null;
+      state.localizationRunning = Boolean(data.localization?.active);
+      renderRegionSelect();
+      renderSavedRegions();
+      updatePublishUi(state.publishingStatus);
+      updateLocalizationUi(state.localizationStatus);
+      if (data.latestTelemetry) updateTelemetry(data.latestTelemetry);
+      else if (data.latestTopic?.payload?.lat != null && data.latestTopic?.payload?.lon != null) {
+        updateTelemetry({ topic: data.latestTopic.name, ...data.latestTopic.payload });
+      }
+      if (data.system) renderSystemStatus(data.system);
+    });
+
+    eventSource.addEventListener("telemetry", (event) => updateTelemetry(JSON.parse(event.data)));
+    eventSource.addEventListener("topic", (event) => {
+      const data = JSON.parse(event.data);
+      elements.topicName.textContent = data.name;
+    });
+    eventSource.addEventListener("publish", (event) => {
+      const data = JSON.parse(event.data);
+      addLog(`发布 ${data.flag || data.field}: ${data.region?.name || "region"}`);
+    });
+    eventSource.addEventListener("publish-state", (event) => {
+      const data = JSON.parse(event.data);
+      state.publishingStatus = data;
+      state.publishing = Boolean(data?.active);
+      updatePublishUi(data);
+    });
+    eventSource.addEventListener("localization-state", (event) => {
+      const data = JSON.parse(event.data);
+      state.localizationStatus = data;
+      state.localizationRunning = Boolean(data?.active);
+      updateLocalizationUi(data);
+    });
+    eventSource.addEventListener("system-status", (event) => {
+      renderSystemStatus(JSON.parse(event.data));
+    });
+    eventSource.addEventListener("regions", (event) => {
+      const data = JSON.parse(event.data);
+      state.regions = data.regions || [];
+      renderRegionSelect();
+      renderSavedRegions();
+      updateRegionReadout();
+    });
+    eventSource.addEventListener("agent", () => addLog("Agent 结果已广播"));
+  }
+
+  connect();
 }
 
 function updateTelemetry(data) {
   state.latestTelemetry = data;
   const sample = {
+    id: ++telemetrySequence,
     time: data.time || new Date().toISOString(),
     lat: toFiniteNumber(data.lat),
     lon: toFiniteNumber(data.lon),
@@ -1037,7 +1673,15 @@ function updateTelemetry(data) {
   };
   if (sample.lat !== null && sample.lon !== null) {
     state.telemetryHistory.push(sample);
-    if (state.telemetryHistory.length > MAX_HISTORY) state.telemetryHistory.shift();
+    if (state.telemetryHistory.length > MAX_HISTORY) {
+      const removed = state.telemetryHistory.shift();
+      trajectoryProjection.dom.pixels.delete(removed.id);
+      trajectoryProjection.dsm.pixels.delete(removed.id);
+      trajectoryProjection.dom.pending.delete(removed.id);
+      trajectoryProjection.dsm.pending.delete(removed.id);
+    }
+    cacheTelemetryProjection("dom", sample);
+    cacheTelemetryProjection("dsm", sample);
   }
 
   elements.topicName.textContent = data.topic || "/localization/fix";
@@ -1047,193 +1691,46 @@ function updateTelemetry(data) {
   elements.headingValue.textContent = `${formatNumber(data.heading, 0)}°`;
   elements.speedValue.textContent = `${formatNumber(data.speed, 2)} m/s`;
   elements.sourceValue.textContent = data.source || "--";
-  elements.trajInfo.textContent = `${state.telemetryHistory.length} points · live`;
-  drawVisualizations();
-  renderVectorLayer();
-}
-
-function renderCurveLegend() {
-  elements.curveLegend.innerHTML = CURVE_SERIES.map(
-    (series) => `<span class="lg" style="color:${series.color}">${series.label}</span>`
-  ).join("");
-}
-
-function drawVisualizations() {
-  drawTrajectory();
-  drawCurves();
-}
-
-function setupCanvas(canvas) {
-  const rect = canvas.getBoundingClientRect();
-  const ratio = Math.min(window.devicePixelRatio || 1, 2);
-  const width = Math.max(1, Math.round(rect.width * ratio));
-  const height = Math.max(1, Math.round(rect.height * ratio));
-  if (canvas.width !== width || canvas.height !== height) {
-    canvas.width = width;
-    canvas.height = height;
-  }
-  const ctx = canvas.getContext("2d");
-  ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-  return { ctx, width: rect.width, height: rect.height };
-}
-
-function drawGrid(ctx, width, height, padding) {
-  ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = "#0c1720";
-  ctx.fillRect(0, 0, width, height);
-
-  const wash = ctx.createLinearGradient(0, 0, 0, height);
-  wash.addColorStop(0, "rgba(85, 184, 232, 0.035)");
-  wash.addColorStop(1, "rgba(8, 16, 24, 0)");
-  ctx.fillStyle = wash;
-  ctx.fillRect(0, 0, width, height);
-
-  ctx.strokeStyle = "rgba(130, 190, 220, 0.09)";
-  ctx.lineWidth = 1;
-  for (let x = padding; x <= width - padding; x += Math.max(38, (width - padding * 2) / 8)) {
-    ctx.beginPath();
-    ctx.moveTo(x, padding);
-    ctx.lineTo(x, height - padding);
-    ctx.stroke();
-  }
-  for (let y = padding; y <= height - padding; y += Math.max(28, (height - padding * 2) / 6)) {
-    ctx.beginPath();
-    ctx.moveTo(padding, y);
-    ctx.lineTo(width - padding, y);
-    ctx.stroke();
-  }
-}
-
-function drawTrajectory() {
-  const { ctx, width, height } = setupCanvas(elements.trajectoryCanvas);
-  const padding = 26;
-  drawGrid(ctx, width, height, padding);
-  const points = state.telemetryHistory.filter((item) => Number.isFinite(item.lat) && Number.isFinite(item.lon));
-  if (points.length < 2) {
-    drawEmptyState(ctx, width, height, "WAITING FOR POSITION");
-    return;
-  }
-  const lats = points.map((point) => point.lat);
-  const lons = points.map((point) => point.lon);
-  const minLat = Math.min(...lats);
-  const maxLat = Math.max(...lats);
-  const minLon = Math.min(...lons);
-  const maxLon = Math.max(...lons);
-  const latRange = Math.max(maxLat - minLat, 0.00001);
-  const lonRange = Math.max(maxLon - minLon, 0.00001);
-  const plotWidth = width - padding * 2;
-  const plotHeight = height - padding * 2;
-  const mapped = points.map((point) => ({
-    x: padding + ((point.lon - minLon) / lonRange) * plotWidth,
-    y: height - padding - ((point.lat - minLat) / latRange) * plotHeight
-  }));
-
-  const gradient = ctx.createLinearGradient(padding, 0, width - padding, 0);
-  gradient.addColorStop(0, "rgba(85, 184, 232, 0.5)");
-  gradient.addColorStop(1, "#8dd8f8");
-  ctx.strokeStyle = gradient;
-  ctx.lineWidth = 1.8;
-  ctx.shadowColor = "rgba(85, 184, 232, 0.18)";
-  ctx.shadowBlur = 4;
-  ctx.beginPath();
-  mapped.forEach((point, index) => (index ? ctx.lineTo(point.x, point.y) : ctx.moveTo(point.x, point.y)));
-  ctx.stroke();
-  ctx.shadowBlur = 0;
-
-  const start = mapped[0];
-  const end = mapped[mapped.length - 1];
-  drawPoint(ctx, start.x, start.y, "#607381", 3.5);
-  drawPoint(ctx, end.x, end.y, "#8dd8f8", 4.5);
-  ctx.fillStyle = "rgba(145, 164, 178, 0.7)";
-  ctx.font = "9px JetBrains Mono, SFMono-Regular, Menlo, monospace";
-  ctx.fillText("START", start.x + 7, start.y - 7);
-  ctx.fillStyle = "#8dd8f8";
-  ctx.fillText("NOW", end.x + 7, end.y - 7);
-}
-
-function drawCurves() {
-  const { ctx, width, height } = setupCanvas(elements.curveCanvas);
-  const padding = 26;
-  drawGrid(ctx, width, height, padding);
-  const history = state.telemetryHistory;
-  if (history.length < 2) {
-    drawEmptyState(ctx, width, height, "WAITING FOR TELEMETRY");
-    return;
-  }
-  const plotWidth = width - padding * 2;
-  const plotHeight = height - padding * 2;
-  for (const series of CURVE_SERIES) {
-    const values = history.map((item) => toFiniteNumber(item[series.key])).filter((value) => value !== null);
-    if (values.length < 2) continue;
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    const range = Math.max(max - min, Math.abs(max) * 0.02, 0.01);
-    ctx.strokeStyle = series.color;
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    let drawing = false;
-    history.forEach((item, index) => {
-      const value = toFiniteNumber(item[series.key]);
-      if (value === null) {
-        drawing = false;
-        return;
-      }
-      const x = padding + (index / Math.max(1, history.length - 1)) * plotWidth;
-      const y = height - padding - ((value - min) / range) * plotHeight;
-      if (!drawing) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
-      drawing = true;
-    });
-    ctx.stroke();
-    const latest = toFiniteNumber(history.at(-1)?.[series.key]);
-    if (latest !== null) {
-      ctx.fillStyle = series.color;
-      ctx.font = "9px JetBrains Mono, SFMono-Regular, Menlo, monospace";
-      ctx.fillText(`${series.label} ${latest.toFixed(series.key === "heading" ? 0 : 1)}${series.unit}`, padding + 4, padding + 12 + CURVE_SERIES.indexOf(series) * 14);
-    }
-  }
-}
-
-function drawEmptyState(ctx, width, height, text) {
-  ctx.fillStyle = "rgba(96, 115, 129, 0.72)";
-  ctx.font = "9px JetBrains Mono, SFMono-Regular, Menlo, monospace";
-  ctx.textAlign = "center";
-  ctx.fillText(text, width / 2, height / 2);
-  ctx.textAlign = "start";
-}
-
-function drawPoint(ctx, x, y, color, radius) {
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.arc(x, y, radius, 0, Math.PI * 2);
-  ctx.fill();
+  if (sample.lat !== null && sample.lon !== null) queryTelemetryElevation(sample.lat, sample.lon);
+  scheduleTrajectoryUpdate();
 }
 
 function toContentPoint(event) {
-  const rect = elements.mapViewport.getBoundingClientRect();
+  return toContentPointForMap(event, "dom");
+}
+
+function toContentPointForMap(event, kind) {
+  const { viewport, view } = mapParts(kind);
+  const rect = viewport?.getBoundingClientRect();
+  if (!rect) return { x: 0, y: 0 };
   return {
-    x: (event.clientX - rect.left - state.view.x) / state.view.scale,
-    y: (event.clientY - rect.top - state.view.y) / state.view.scale
+    x: (event.clientX - rect.left - view.x) / view.scale,
+    y: (event.clientY - rect.top - view.y) / view.scale
   };
 }
 
 function clampContentPoint(point) {
-  return {
-    x: clamp(point.x, 0, state.source.width),
-    y: clamp(point.y, 0, state.source.height)
-  };
+  return clampContentPointForSource(point, state.source);
+}
+
+function clampContentPointForSource(point, source) {
+  return { x: clamp(point.x, 0, source.width), y: clamp(point.y, 0, source.height) };
 }
 
 function contentToLatLon(x, y) {
-  const px = clamp(x, 0, state.source.width);
-  const py = clamp(y, 0, state.source.height);
-  if (state.source.type === "tiles") {
-    return tileToLatLon(state.source.minX + px / TILE_SIZE, state.source.minY + py / TILE_SIZE, state.source.z);
+  return contentToLatLonForSource(state.source, x, y);
+}
+
+function contentToLatLonForSource(source, x, y) {
+  const px = clamp(x, 0, source.width);
+  const py = clamp(y, 0, source.height);
+  if (source.type === "tiles") {
+    return tileToLatLon(source.minX + px / TILE_SIZE, source.minY + py / TILE_SIZE, source.z);
   }
-  const bounds = state.source.bounds || DEFAULT_BOUNDS;
+  const bounds = source.bounds || DEFAULT_BOUNDS;
   return {
-    lon: bounds.west + (px / state.source.width) * (bounds.east - bounds.west),
-    lat: bounds.north - (py / state.source.height) * (bounds.north - bounds.south)
+    lon: bounds.west + (px / source.width) * (bounds.east - bounds.west),
+    lat: bounds.north - (py / source.height) * (bounds.north - bounds.south)
   };
 }
 
@@ -1246,22 +1743,121 @@ function tileToLatLon(x, y, z) {
 }
 
 function latLonToContent(lat, lon) {
-  if (state.source.type === "tiles") {
-    const z = state.source.z;
-    const scale = 2 ** z;
+  return latLonToContentForSource(state.source, lat, lon);
+}
+
+function latLonToContentForSource(source, lat, lon) {
+  if (source.type === "tiles") {
+    const scale = 2 ** source.z;
     const tileX = ((lon + 180) / 360) * scale;
-    const latRad = (lat * Math.PI) / 180;
+    const safeLat = clamp(lat, -85.05112878, 85.05112878);
+    const latRad = (safeLat * Math.PI) / 180;
     const tileY = (1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * scale;
-    return {
-      x: (tileX - state.source.minX) * TILE_SIZE,
-      y: (tileY - state.source.minY) * TILE_SIZE
-    };
+    return { x: (tileX - source.minX) * TILE_SIZE, y: (tileY - source.minY) * TILE_SIZE };
   }
-  const bounds = state.source.bounds || DEFAULT_BOUNDS;
+  const bounds = source.bounds || DEFAULT_BOUNDS;
   return {
-    x: ((lon - bounds.west) / (bounds.east - bounds.west)) * state.source.width,
-    y: ((bounds.north - lat) / (bounds.north - bounds.south)) * state.source.height
+    x: ((lon - bounds.west) / (bounds.east - bounds.west)) * source.width,
+    y: ((bounds.north - lat) / (bounds.north - bounds.south)) * source.height
   };
+}
+
+function queryDomPointerCoordinates(point) {
+  const source = state.source;
+  if (!isGeoTiffSource(source)) {
+    const coord = contentToLatLonForSource(source, point.x, point.y);
+    if (elements.cursorReadout) elements.cursorReadout.textContent = `${coord.lat.toFixed(6)}, ${coord.lon.toFixed(6)}`;
+    return;
+  }
+  const fingerprint = source.fingerprint;
+  const requestId = ++domPointerRequestId;
+  window.clearTimeout(domPointerTimer);
+  domPointerController?.abort();
+  domPointerTimer = window.setTimeout(async () => {
+    domPointerController = new AbortController();
+    try {
+      const [coord] = await requestCoordinateBatch(
+        "dom", "pixel_to_wgs84", [{ x: point.x, y: point.y }], fingerprint, domPointerController.signal
+      );
+      if (requestId !== domPointerRequestId || state.source.fingerprint !== fingerprint) return;
+      const lat = toFiniteNumber(coord.lat);
+      const lon = toFiniteNumber(coord.lon);
+      if (lat !== null && lon !== null && elements.cursorReadout) {
+        elements.cursorReadout.textContent = `${lat.toFixed(6)}, ${lon.toFixed(6)}`;
+        elements.cursorReadout.classList.remove("error");
+      }
+    } catch (error) {
+      if (error.name !== "AbortError" && error.name !== "StaleMapError" && requestId === domPointerRequestId) {
+        setUploadStatus("dom", `坐标查询失败: ${error.message}`, true);
+      }
+    }
+  }, 70);
+}
+
+function queryDsmPointerElevation(x, y) {
+  const source = state.dsmSource;
+  const fingerprint = source.fingerprint;
+  const requestId = ++dsmPointerRequestId;
+  elements.dsmCursorReadout?.classList.remove("error");
+  if (elements.dsmCursorReadout) elements.dsmCursorReadout.textContent = `x ${x.toFixed(1)}, y ${y.toFixed(1)} · 高程…`;
+  window.clearTimeout(dsmPointerTimer);
+  dsmPointerController?.abort();
+  if (!source.loaded) {
+    if (elements.dsmCursorReadout) elements.dsmCursorReadout.textContent = "DSM 未加载";
+    return;
+  }
+  dsmPointerTimer = window.setTimeout(async () => {
+    dsmPointerController = new AbortController();
+    try {
+      const data = await fetchDsmElevation({ x, y }, dsmPointerController.signal);
+      if (requestId !== dsmPointerRequestId || state.dsmSource.fingerprint !== fingerprint) return;
+      if (data.fingerprint && String(data.fingerprint) !== String(fingerprint)) return;
+      const elevation = toFiniteNumber(data.elevation);
+      const lat = toFiniteNumber(data.lat);
+      const lon = toFiniteNumber(data.lon);
+      const coordinate = lat !== null && lon !== null ? `${lat.toFixed(6)}, ${lon.toFixed(6)}` : `x ${x.toFixed(1)}, y ${y.toFixed(1)}`;
+      elements.dsmCursorReadout.textContent = elevation === null
+        ? `${coordinate} · ${data.error || "无高程"}`
+        : `${coordinate} · ${elevation.toFixed(2)} ${data.unit || "m"}`;
+    } catch (error) {
+      if (error.name !== "AbortError" && requestId === dsmPointerRequestId) {
+        elements.dsmCursorReadout.textContent = `高程查询失败: ${error.message}`;
+        elements.dsmCursorReadout.classList.add("error");
+      }
+    }
+  }, 100);
+}
+
+function queryTelemetryElevation(lat, lon) {
+  const fingerprint = state.dsmSource.fingerprint;
+  const requestId = ++telemetryElevationRequestId;
+  window.clearTimeout(telemetryElevationTimer);
+  telemetryElevationController?.abort();
+  if (!state.dsmSource.loaded) {
+    if (elements.groundElevationValue) elements.groundElevationValue.textContent = "--";
+    return;
+  }
+  telemetryElevationTimer = window.setTimeout(async () => {
+    telemetryElevationController = new AbortController();
+    try {
+      const data = await fetchDsmElevation({ lat, lon }, telemetryElevationController.signal);
+      if (requestId !== telemetryElevationRequestId || state.dsmSource.fingerprint !== fingerprint) return;
+      if (data.fingerprint && String(data.fingerprint) !== String(fingerprint)) return;
+      const elevation = toFiniteNumber(data.elevation);
+      elements.groundElevationValue.textContent = elevation === null ? "--" : `${elevation.toFixed(1)} ${data.unit || "m"}`;
+    } catch (error) {
+      if (error.name !== "AbortError" && requestId === telemetryElevationRequestId) elements.groundElevationValue.textContent = "--";
+    }
+  }, 350);
+}
+
+async function fetchDsmElevation(coordinates, signal) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(coordinates)) params.set(key, String(value));
+  const response = await fetch(`/api/map/dsm/elevation?${params}`, { signal, headers: { accept: "application/json" } });
+  const data = await response.json();
+  if (!response.ok || data.ok === false) throw new Error(data.error || `Request failed: ${response.status}`);
+  return data;
 }
 
 async function postJson(url, payload) {
@@ -1326,23 +1922,28 @@ function formatNumber(value, digits) {
 function bindRailNavigation() {
   const rail = document.querySelector(".rail");
   if (!rail) return;
-
   const buttons = Array.from(rail.querySelectorAll(".rail-item[data-view]"));
-  const sidePanel = document.querySelector(".side-panel");
-  const sections = sidePanel ? Array.from(sidePanel.querySelectorAll("[data-view]")) : [];
 
   buttons.forEach((button) => {
     button.addEventListener("click", () => {
-      buttons.forEach((btn) => btn.classList.remove("active"));
+      buttons.forEach((item) => item.classList.remove("active"));
       button.classList.add("active");
-
       const view = button.dataset.view;
-      const target = sections.find((section) => section.dataset.view === view);
-      if (target && sidePanel) {
+      const explicitTarget = Array.from(document.querySelectorAll("[data-rail-target]"))
+        .find((node) => node.dataset.railTarget === view);
+      const panelTarget = Array.from(document.querySelectorAll("[data-view]"))
+        .find((node) => !node.classList.contains("rail-item") && node.dataset.view === view);
+      const target = explicitTarget || panelTarget;
+      if (!target) return;
+
+      if (target.classList.contains("vehicle-hud")) {
+        target.focus({ preventScroll: true });
+      } else {
         target.scrollIntoView({ behavior: "smooth", block: "start" });
-        target.classList.add("panel-highlight");
-        setTimeout(() => target.classList.remove("panel-highlight"), 800);
       }
+      target.classList.remove("panel-highlight");
+      requestAnimationFrame(() => target.classList.add("panel-highlight"));
+      window.setTimeout(() => target.classList.remove("panel-highlight"), 800);
     });
   });
 }
