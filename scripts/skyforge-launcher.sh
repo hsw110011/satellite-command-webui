@@ -166,9 +166,10 @@ skyforge_is_ready() {
   local url="$1"
   local page=""
   command -v curl >/dev/null 2>&1 || return 1
-  curl --silent --fail --max-time 1 "$url/api/regions" >/dev/null 2>&1 || return 1
-  page="$(curl --silent --fail --max-time 1 "$url/" 2>/dev/null)" || return 1
-  [[ "$page" == *"SkyForge"* ]]
+  curl --noproxy '*' --silent --fail --max-time 1 "$url/api/regions" >/dev/null 2>&1 || return 1
+  curl --noproxy '*' --silent --fail --max-time 1 "$url/api/system/status" >/dev/null 2>&1 || return 1
+  page="$(curl --noproxy '*' --silent --fail --max-time 1 "$url/" 2>/dev/null)" || return 1
+  [[ -n "$page" && "$page" == *"<html"* ]]
 }
 
 port_is_occupied() {
@@ -304,9 +305,13 @@ main() {
   trap cleanup EXIT INT TERM
   start_backend "$python_bin"
 
-  mkdir -p "$CONFIG_DIR/chromium-profile"
+  local browser_profile_dir="$CONFIG_DIR/chromium-profile"
+  if [[ "$browser" == */chromium-browser && -x /snap/bin/chromium ]]; then
+    browser_profile_dir="$HOME/snap/chromium/common/skyforge-profile"
+  fi
+  mkdir -p "$browser_profile_dir"
   local browser_args=(
-    "--user-data-dir=$CONFIG_DIR/chromium-profile"
+    "--user-data-dir=$browser_profile_dir"
     "--class=SkyForge"
     "--name=SkyForge"
     "--no-first-run"
