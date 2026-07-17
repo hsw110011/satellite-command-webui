@@ -19,9 +19,11 @@ class Settings:
     project_root: Path
     public_dir: Path
     region_store: Path
+    map_store_dir: Path
     host: str
     port: int
     node_name: str
+    globalpose_topic: str
     fix_topic: str
     odom_topic: str
     default_region_topic: str
@@ -39,9 +41,13 @@ class Settings:
             project_root=project_root,
             public_dir=project_root / "public",
             region_store=project_root / "data" / "regions.json",
+            map_store_dir=Path(
+                os.getenv("SKYFORGE_MAP_STORE_DIR", str(project_root / "data" / "maps"))
+            ).expanduser().resolve(),
             host=os.getenv("SKYFORGE_HOST", "127.0.0.1"),
             port=int(os.getenv("SKYFORGE_PORT", os.getenv("PORT", "3000"))),
             node_name=os.getenv("SKYFORGE_ROS_NODE", "skyforge_gateway"),
+            globalpose_topic=os.getenv("SKYFORGE_GLOBALPOSE_TOPIC", "/self_state/globalpose"),
             fix_topic=os.getenv("SKYFORGE_FIX_TOPIC", "/fix"),
             odom_topic=os.getenv("SKYFORGE_ODOM_TOPIC", "/odom"),
             default_region_topic=os.getenv("SKYFORGE_REGION_TOPIC", "/selected_region"),
@@ -60,9 +66,11 @@ class Settings:
     def public_status(self) -> dict:
         return {
             "nodeName": self.node_name,
+            "globalposeTopic": self.globalpose_topic,
             "fixTopic": self.fix_topic,
             "odomTopic": self.odom_topic,
             "regionTopic": self.default_region_topic,
+            "mapStoreDir": str(self.map_store_dir),
             "simulation": self.simulation,
             "allowStringFallback": self.allow_string_fallback,
             "launch": {

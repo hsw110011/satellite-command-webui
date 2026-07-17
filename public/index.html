@@ -12,7 +12,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css" />
+    <link rel="stylesheet" href="./styles.css?v=20260717.9" />
   </head>
   <body>
     <div class="app-shell">
@@ -123,7 +123,7 @@
             <div class="hud-source">
               <span>SOURCE</span>
               <b id="sourceValue">--</b>
-              <small id="topicName">/localization/fix</small>
+              <small id="topicName">/self_state/globalpose</small>
             </div>
           </section>
 
@@ -204,6 +204,9 @@
                 </div>
                 <div class="map-toolbar-row map-toolbar-row-actions">
                   <span class="toolbar-label">地图操作</span>
+                  <button id="dsmRectButton" class="icon-button action-button" type="button" title="在 DSM 上矩形框选区域">
+                    <span aria-hidden="true">□</span><b>矩形</b>
+                  </button>
                   <button id="dsmLocateButton" class="icon-button action-button" type="button" title="回到最新定位位置">
                     <span aria-hidden="true">⌾</span><b>当前位置</b>
                   </button>
@@ -231,6 +234,7 @@
                 </div>
                 <div class="compass" aria-hidden="true"><span>N</span></div>
                 <div class="scale-bar" aria-hidden="true"><i></i><span>500 m</span></div>
+                <div id="dsmDrawHint" class="draw-hint" hidden>按住左键拖动 · 松开后确认区域</div>
                 <div id="dsmCursorReadout" class="cursor-readout">高程 --</div>
               </div>
             </section>
@@ -356,6 +360,31 @@
       </div>
     </div>
 
-    <script src="./app.js" type="module"></script>
+    <dialog id="regionConfirmDialog" class="region-confirm-dialog">
+      <form method="dialog" class="region-confirm-form">
+        <header>
+          <div>
+            <span>REGION COMMIT</span>
+            <strong>确认创建区域</strong>
+          </div>
+          <button id="cancelRegionIconButton" class="dialog-close" value="cancel" type="submit" aria-label="取消创建区域" title="取消">×</button>
+        </header>
+        <div class="region-confirm-meta">
+          <span id="pendingRegionSource">DOM · RECTANGLE</span>
+          <span>WGS 84</span>
+        </div>
+        <label class="region-name-field">
+          <span>区域名称</span>
+          <input id="pendingRegionName" maxlength="64" autocomplete="off" spellcheck="false" />
+        </label>
+        <pre id="pendingRegionCoordinates" class="region-confirm-coordinates">--</pre>
+        <footer>
+          <button id="cancelRegionButton" class="ghost-button" value="cancel" type="submit">取消</button>
+          <button id="confirmRegionButton" class="primary-button" value="confirm" type="submit">确认创建</button>
+        </footer>
+      </form>
+    </dialog>
+
+    <script src="./app.js?v=20260717.9" type="module"></script>
   </body>
 </html>

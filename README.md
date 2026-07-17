@@ -15,7 +15,7 @@
 ┌───────────────────────────┴─────────────────────────────────────┐
 │               Python Gateway (FastAPI + rospy)                    │
 │  ros_backend/app.py                                              │
-│  - 订阅 /fix (NavSatFix) 和 /odom (Odometry)                    │
+│  - 订阅 /self_state/globalpose (GlobalPose) 和 /odom            │
 │  - 发布 /selected_region (skyforge_msgs/RegionCommand)           │
 │  - 管理 roslaunch 定位程序生命周期                                │
 │  - SSE 实时推送遥测、状态、区域变更                               │
@@ -58,7 +58,7 @@ catkin_make
 source devel/setup.bash
 ```
 
-编译后生成 `skyforge_msgs/RegionCommand` 消息类型。
+编译后生成 `skyforge_msgs/GeoPoint` 和 `skyforge_msgs/RegionCommand` 消息类型。`/self_state/globalpose` 的实际消息类型由网关运行时自动识别。
 
 ### 3. 安装 Python 依赖
 
@@ -69,7 +69,7 @@ source .venv/bin/activate
 pip install -r ros_backend/requirements.txt
 ```
 
-> `--system-site-packages` 是必须的，让 venv 继承系统的 `rospy`、`std_msgs`、`geometry_msgs`。
+> `--system-site-packages` 是必须的，让 venv 继承系统的 `rospy`、`std_msgs`、`sensor_msgs`、`nav_msgs`。
 
 ### 4. 配置环境变量
 
@@ -86,8 +86,13 @@ nano config/skyforge.env
 |------|--------|------|
 | `SKYFORGE_HOST` | `127.0.0.1` | Web 服务监听地址 |
 | `SKYFORGE_PORT` | `3000` | Web 服务端口 |
+| `SKYFORGE_TILE_CACHE_ITEMS` | `768` | 后端 DOM/DSM PNG 瓦片内存缓存上限 |
+| `SKYFORGE_MAP_STORE_DIR` | `data/maps` | DOM/DSM TIFF 持久化目录，重启时自动恢复 |
+| `SKYFORGE_BUILD_OVERVIEWS` | `1` | 为大 TIFF 自动构建内部金字塔，避免缩放时扫描整幅影像 |
+| `SKYFORGE_OVERVIEW_MIN_PIXELS` | `16777216` | 超过该像素数才自动构建金字塔 |
 | `SKYFORGE_ROS_NODE` | `skyforge_gateway` | 网关 ROS 节点名 |
-| `SKYFORGE_FIX_TOPIC` | `/fix` | 订阅的 NavSatFix 话题（经纬度定位） |
+| `SKYFORGE_GLOBALPOSE_TOPIC` | `/self_state/globalpose` | 主轨迹输入，运行时自动识别实际 `GlobalPose` 类型 |
+| `SKYFORGE_FIX_TOPIC` | `/fix` | 尚未收到 globalpose 时的 NavSatFix 兼容回退 |
 | `SKYFORGE_ODOM_TOPIC` | `/odom` | 订阅的 Odometry 话题（航向/速度） |
 | `SKYFORGE_REGION_TOPIC` | `/selected_region` | 发布区域指令的话题 |
 | `SKYFORGE_LAUNCH_PACKAGE` | _(空)_ | 定位 launch 所在包名 |
@@ -179,7 +184,8 @@ chmod +x scripts/skyforge-launcher.sh scripts/install-ubuntu-launcher.sh
 
 | 话题 | 类型 | 频率 | 用途 |
 |------|------|------|------|
-| `/fix` | `sensor_msgs/NavSatFix` | 1–10 Hz | 经纬度、海拔 |
+| `/self_state/globalpose` | 定位程序实际的 `*/GlobalPose` | 1–20 Hz | 使用 latitude/longitude 生成主轨迹 |
+| `/fix` | `sensor_msgs/NavSatFix` | 1–10 Hz | globalpose 尚未就绪时的兼容定位 |
 | `/odom` | `nav_msgs/Odometry` | 1–50 Hz | 航向、速度 |
 
 前端通过 SSE 实时接收并渲染：
@@ -201,7 +207,8 @@ uint8 flag          # 0=GPS_FLAG, 1=DR_FLAG, 2=MATCH_FLAG
 string region_id
 string region_name
 string shape        # "rectangle" 或 "polygon"
-geometry_msgs/Point32[] points   # x=lon, y=lat, z=0
+skyforge_msgs/GeoPoint[] points  # latitude / longitude / altitude
+string region_json               # 与 data/regions.json 中该区域完全一致
 ```
 
 如果 `skyforge_msgs` 未编译，且 `SKYFORGE_ALLOW_STRING_FALLBACK=1`，则回退到 `std_msgs/String`（JSON 格式）。
@@ -218,6 +225,7 @@ geometry_msgs/Point32[] points   # x=lon, y=lat, z=0
 | DELETE | `/api/regions/:id` | 删除区域 |
 | POST | `/api/publish/start` | 开始持续发布区域 |
 | POST | `/api/publish/stop` | 停止发布 |
+| POST | `/api/topic/globalpose` | 无 ROS 时直接注入 latitude/longitude 定位输出 |
 | POST | `/api/localization/start` | 启动定位 launch |
 | POST | `/api/localization/stop` | 停止定位 launch |
 | POST | `/api/agent/run` | 调用 Agent/VLM |
@@ -253,7 +261,9 @@ geometry_msgs/Point32[] points   # x=lon, y=lat, z=0
 | DOM GeoTIFF | `.tif/.tiff/.geotiff` | 加载完整正射影像并读取文件内坐标系 |
 | DSM GeoTIFF | `.tif/.tiff/.geotiff` | 加载完整表面模型、着色并提供高程查询 |
 
-大尺寸 TIFF 不会先压缩成一张低清预览图。后端保留原始栅格，根据当前视口读取 256 像素块：全图状态自动使用概览层，放大到 `1:1` 时自动切换到 level 0 原始像素层。DOM 与 DSM 可分别滚轮缩放、拖动、适配全图和单图放大。
+后端保留原始栅格，根据当前视口读取 256 像素块：全图状态自动使用概览层，放大到 `1:1` 时自动切换到 level 0 原始像素层。大 TIFF 首次上传或首次恢复时会一次性构建内部 Overview 金字塔，文件会略微增大，但后续缩放不再扫描整幅影像。浏览器使用最大边 2048 像素的全图预览作为瓦片切换期间的底层兜底，目标区域仍由原始分辨率瓦片覆盖。DOM 与 DSM 可分别滚轮缩放、拖动、适配全图和单图放大。
+
+上传成功的 DOM/DSM 会分别保存为 `data/maps/dom.tif` 和 `data/maps/dsm.tif`。刷新页面或重启网关后会自动恢复；标识位、区域话题、Agent 地址、Agent 类型和上次选择区域保存在浏览器本地。
 
 可用下面的命令检查 TIFF 是否包含坐标：
 
@@ -310,18 +320,20 @@ satellite-command-webui/
 
 ## 给其他 ROS 节点集成的要点
 
-1. **发布定位数据到 `/fix`**：使用 `sensor_msgs/NavSatFix`，填充 `latitude`、`longitude`、`altitude` 字段
+1. **发布主轨迹到 `/self_state/globalpose`**：网关按实际消息解析 `latitude`、`longitude`、`height`、`azimuth`、`vNorth`、`vEast`、`vUp`
 2. **发布里程计到 `/odom`**：使用 `nav_msgs/Odometry`，WebUI 从中提取航向和速度
-3. **订阅区域指令**：监听 `/selected_region`（类型 `skyforge_msgs/RegionCommand`），在地图匹配等节点中读取 `flag` 和 `points`
+3. **订阅区域指令**：监听 `/selected_region`（类型 `skyforge_msgs/RegionCommand`），读取 `flag`、具名经纬度 `points` 和完整 `region_json`
 4. **话题名可配置**：修改 `config/skyforge.env` 中对应变量即可适配你的话题命名
 5. **自定义消息编译**：确保 `ros1_ws/devel/setup.bash` 被 source，否则回退到 `std_msgs/String`
+
+启动网关前还需要 source 定位程序自己的工作空间，使 ROS 能动态加载 `/self_state/globalpose` 的实际消息类型及其 `self_state/InsStatus`、`sensor/PosType` 依赖。
 
 ---
 
 ## 常见问题
 
 **Q: 轨迹不显示？**
-- 确认 `/fix` 话题有数据：`rostopic echo /fix`
+- 确认 `/self_state/globalpose` 话题有数据：`rostopic echo /self_state/globalpose`
 - 确认经纬度在地图可视范围内
 - 确认 SSE 连接正常（右上角 API 状态指示灯亮绿）
 

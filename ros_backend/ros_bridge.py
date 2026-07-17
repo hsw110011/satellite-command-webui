@@ -11,8 +11,8 @@ from .settings import Settings
 
 try:
     import rosgraph  # type: ignore
+    import roslib.message  # type: ignore
     import rospy  # type: ignore
-    from geometry_msgs.msg import Point32  # type: ignore
     from nav_msgs.msg import Odometry  # type: ignore
     from sensor_msgs.msg import NavSatFix  # type: ignore
     from std_msgs.msg import String  # type: ignore
@@ -21,8 +21,8 @@ try:
     ROS_IMPORT_ERROR: Optional[str] = None
 except Exception as exc:  # pragma: no cover - depends on ROS installation
     rosgraph = None  # type: ignore
+    roslib = None  # type: ignore
     rospy = None  # type: ignore
-    Point32 = None  # type: ignore
     Odometry = None  # type: ignore
     NavSatFix = None  # type: ignore
     String = None  # type: ignore
@@ -50,7 +50,10 @@ class RosBridge:
         self._publishers: Dict[str, Any] = {}
         self._subscribers = []
         self._message_class: Any = None
+        self._geo_point_class: Any = None
         self._message_type = "unavailable"
+        self._trajectory_message_type = "unavailable"
+        self._globalpose_seen = False
         self._latest: Dict[str, Any] = {
             "lat": None,
             "lon": None,
@@ -90,6 +93,7 @@ class RosBridge:
             if self.settings.simulation:
                 self._started = True
                 self._message_type = "simulation/json"
+                self._trajectory_message_type = "simulation/json"
                 self._start_error = None
                 return True
             if not ROS_AVAILABLE:
@@ -104,19 +108,29 @@ class RosBridge:
                 if not rospy.core.is_initialized():
                     rospy.init_node(self.settings.node_name, anonymous=False, disable_signals=True)
                 try:
-                    from skyforge_msgs.msg import RegionCommand  # type: ignore
+                    from skyforge_msgs.msg import GeoPoint, RegionCommand  # type: ignore
 
                     self._message_class = RegionCommand
+                    self._geo_point_class = GeoPoint
                     self._message_type = "skyforge_msgs/RegionCommand"
+                    self._trajectory_message_type = f"ROS AnyMsg ({self.settings.globalpose_topic})"
                 except Exception as exc:
                     if not self.settings.allow_string_fallback:
                         raise RuntimeError(
-                            "无法导入 skyforge_msgs/RegionCommand。请先 catkin_make 并 source ros1_ws/devel/setup.bash。"
+                            "无法导入 skyforge_msgs 消息。请先 catkin_make 并 source ros1_ws/devel/setup.bash。"
                         ) from exc
                     self._message_class = String
+                    self._geo_point_class = None
                     self._message_type = "std_msgs/String (explicit fallback)"
+                    self._trajectory_message_type = f"ROS AnyMsg ({self.settings.globalpose_topic})"
 
                 subscribers = [
+                    rospy.Subscriber(
+                        self.settings.globalpose_topic,
+                        rospy.AnyMsg,
+                        self._on_globalpose_any,
+                        queue_size=100,
+                    ),
                     rospy.Subscriber(self.settings.fix_topic, NavSatFix, self._on_fix, queue_size=20),
                     rospy.Subscriber(self.settings.odom_topic, Odometry, self._on_odom, queue_size=50),
                 ]
@@ -142,6 +156,23 @@ class RosBridge:
         normalized = re.sub(r"/{2,}", "/", normalized)
         if not ROS_NAME_PATTERN.fullmatch(normalized) or normalized.endswith("/"):
             raise ValueError(f"无效的 ROS1 话题名称: {topic}")
+        return normalized
+
+    @classmethod
+    def normalize_region(cls, region: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(region, dict):
+            raise ValueError("Region must be an object")
+        normalized = json.loads(json.dumps(region, ensure_ascii=False, allow_nan=False))
+        source_type = str(normalized.get("sourceType", ""))
+        normalized["sourceKind"] = normalized.get("sourceKind") or ("dsm" if "dsm" in source_type else "dom")
+        if isinstance(normalized.get("polygon"), list):
+            normalized["polygon"] = [cls._normalize_coordinate(point) for point in normalized["polygon"]]
+        bbox = normalized.get("bbox")
+        if isinstance(bbox, dict):
+            if isinstance(bbox.get("topLeft"), dict):
+                bbox["topLeft"] = cls._normalize_coordinate(bbox["topLeft"])
+            if isinstance(bbox.get("bottomRight"), dict):
+                bbox["bottomRight"] = cls._normalize_coordinate(bbox["bottomRight"])
         return normalized
 
     def validate_region(self, region: Dict[str, Any]) -> list:
@@ -175,6 +206,7 @@ class RosBridge:
             return {
                 "topic": topic,
                 "messageType": self._message_type,
+                "trajectoryMessageType": self._trajectory_message_type,
                 "simulated": True,
                 "pointCount": len(coordinates),
                 "connections": 1,
@@ -226,9 +258,11 @@ class RosBridge:
                 "nodeStarted": self._started and not simulation,
                 "nodeName": self.settings.node_name,
                 "messageType": self._message_type,
+                "trajectoryMessageType": self._trajectory_message_type,
                 "lastError": self._start_error,
                 "topics": {
                     "fix": self.settings.fix_topic,
+                    "globalpose": self.settings.globalpose_topic,
                     "odom": self.settings.odom_topic,
                     "publishers": list(self._publishers.keys()),
                 },
@@ -254,7 +288,11 @@ class RosBridge:
         message.region_id = str(region.get("id", ""))
         message.region_name = str(region.get("name", ""))
         message.shape = str(region.get("shape", "rectangle"))
-        message.points = [Point32(x=lon, y=lat, z=0.0) for lat, lon in coordinates]
+        message.points = [
+            self._geo_point_class(latitude=lat, longitude=lon, altitude=0.0)
+            for lat, lon in coordinates
+        ]
+        message.region_json = json.dumps(region, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
         return message
 
     @staticmethod
@@ -266,9 +304,11 @@ class RosBridge:
                 raise ValueError("Polygon region requires a polygon array")
             coordinates = []
             for index, point in enumerate(polygon):
-                if not isinstance(point, dict) or "lat" not in point or "lon" not in point:
-                    raise ValueError(f"Polygon point {index} requires lat and lon")
-                coordinates.append((float(point["lat"]), float(point["lon"])))
+                try:
+                    normalized = RosBridge._normalize_coordinate(point)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f"Polygon point {index} requires latitude and longitude") from exc
+                coordinates.append((float(normalized["latitude"]), float(normalized["longitude"])))
             return coordinates
 
         bbox = region.get("bbox")
@@ -279,18 +319,76 @@ class RosBridge:
         if not isinstance(top_left, dict) or not isinstance(bottom_right, dict):
             raise ValueError("Rectangle bbox requires topLeft and bottomRight")
         try:
-            north = float(top_left["lat"])
-            west = float(top_left["lon"])
-            south = float(bottom_right["lat"])
-            east = float(bottom_right["lon"])
+            top_left = RosBridge._normalize_coordinate(top_left)
+            bottom_right = RosBridge._normalize_coordinate(bottom_right)
+            north = float(top_left["latitude"])
+            west = float(top_left["longitude"])
+            south = float(bottom_right["latitude"])
+            east = float(bottom_right["longitude"])
         except (KeyError, TypeError, ValueError) as exc:
             raise ValueError("Rectangle bbox coordinates are invalid") from exc
         if north <= south or east <= west:
             raise ValueError("Rectangle bbox must satisfy north > south and east > west")
         return [(north, west), (north, east), (south, east), (south, west)]
 
+    @staticmethod
+    def _normalize_coordinate(point: Any) -> Dict[str, float]:
+        if not isinstance(point, dict):
+            raise TypeError("Coordinate must be an object")
+        latitude = point.get("latitude", point.get("lat"))
+        longitude = point.get("longitude", point.get("lon"))
+        if latitude is None or longitude is None:
+            raise ValueError("Coordinate requires latitude and longitude")
+        return {"latitude": float(latitude), "longitude": float(longitude)}
+
+    def _on_globalpose_any(self, raw_message: Any) -> None:
+        try:
+            message_type = str(raw_message._connection_header.get("type", "")).strip()
+            message_class = roslib.message.get_message_class(message_type)
+            if not message_type or message_class is None:
+                raise RuntimeError(f"无法解析 globalpose 消息类型: {message_type or 'unknown'}")
+            message = message_class()
+            message.deserialize(raw_message._buff)
+            with self._lock:
+                self._trajectory_message_type = message_type
+                self._start_error = None
+            self._on_globalpose(message)
+        except Exception as exc:
+            with self._lock:
+                self._start_error = f"globalpose 解析失败: {exc}"
+
+    def _on_globalpose(self, message: Any) -> None:
+        latitude = self._message_number(message, "latitude")
+        longitude = self._message_number(message, "longitude")
+        altitude = self._message_number(message, "height", "altitude")
+        heading = self._message_number(message, "azimuth", "heading")
+        north = self._message_number(message, "vNorth")
+        east = self._message_number(message, "vEast")
+        up = self._message_number(message, "vUp")
+        speed = self._message_number(message, "speed")
+        if speed is None and north is not None and east is not None:
+            speed = math.sqrt(north * north + east * east + (up or 0.0) ** 2)
+        if latitude is None or longitude is None or not -90.0 <= latitude <= 90.0 or not -180.0 <= longitude <= 180.0:
+            with self._lock:
+                self._start_error = "globalpose 缺少有效的 latitude/longitude"
+            return
+        with self._lock:
+            self._globalpose_seen = True
+            self._latest.update(
+                {
+                    "lat": latitude,
+                    "lon": longitude,
+                    "altitude": altitude,
+                    "heading": heading,
+                    "speed": speed,
+                }
+            )
+        self._emit_telemetry(self.settings.globalpose_topic, position_update=True)
+
     def _on_fix(self, message: Any) -> None:
         with self._lock:
+            if self._globalpose_seen:
+                return
             self._latest.update(
                 {
                     "lat": self._finite_or_none(message.latitude),
@@ -298,7 +396,7 @@ class RosBridge:
                     "altitude": self._finite_or_none(message.altitude),
                 }
             )
-        self._emit_telemetry(self.settings.fix_topic)
+        self._emit_telemetry(self.settings.fix_topic, position_update=True)
 
     def _on_odom(self, message: Any) -> None:
         linear = message.twist.twist.linear
@@ -310,9 +408,9 @@ class RosBridge:
         with self._lock:
             self._latest.update({"heading": heading, "speed": speed})
         # Always emit telemetry (lat/lon may be None, frontend handles it)
-        self._emit_telemetry(self.settings.odom_topic)
+        self._emit_telemetry(self.settings.odom_topic, position_update=False)
 
-    def _emit_telemetry(self, source_topic: str) -> None:
+    def _emit_telemetry(self, source_topic: str, position_update: bool) -> None:
         with self._lock:
             telemetry = dict(self._latest)
         telemetry.update(
@@ -320,11 +418,22 @@ class RosBridge:
                 "time": _now(),
                 "source": "ros1-noetic",
                 "topic": source_topic,
+                "positionUpdate": position_update,
             }
         )
         self.emit("telemetry", telemetry)
 
     @staticmethod
     def _finite_or_none(value: Any) -> Optional[float]:
-        number = float(value)
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return None
         return number if math.isfinite(number) else None
+
+    @classmethod
+    def _message_number(cls, message: Any, *field_names: str) -> Optional[float]:
+        for field_name in field_names:
+            if hasattr(message, field_name):
+                return cls._finite_or_none(getattr(message, field_name))
+        return None

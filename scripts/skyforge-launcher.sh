@@ -317,6 +317,8 @@ main() {
     "--no-first-run"
     "--no-default-browser-check"
     "--disable-session-crashed-bubble"
+    "--disk-cache-size=1"
+    "--media-cache-size=1"
   )
   if [[ "$WINDOW_MODE" == "kiosk" ]]; then
     browser_args+=("--kiosk" "$SKYFORGE_URL")

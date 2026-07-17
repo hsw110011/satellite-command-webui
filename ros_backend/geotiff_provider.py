@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import io
 import math
+import os
 import threading
 from functools import lru_cache
 from pathlib import Path
@@ -27,6 +28,10 @@ except ImportError as _exc:
     Image = None  # type: ignore
 
 TILE_SIZE = 256
+TILE_CACHE_ITEMS = max(64, min(4096, int(os.getenv("SKYFORGE_TILE_CACHE_ITEMS", "768"))))
+BUILD_OVERVIEWS = os.getenv("SKYFORGE_BUILD_OVERVIEWS", "1").strip().lower() not in {"0", "false", "no"}
+OVERVIEW_MIN_PIXELS = max(1, int(os.getenv("SKYFORGE_OVERVIEW_MIN_PIXELS", str(16 * 1024 * 1024))))
+_OVERVIEW_BUILD_LOCK = threading.Lock()
 WGS84 = CRS.from_epsg(4326) if GEOTIFF_AVAILABLE else None
 TERRAIN_CMAP: List[Tuple[float, Tuple[int, int, int]]] = [
     (0.00, (18, 50, 72)), (0.08, (22, 72, 85)), (0.18, (34, 108, 68)),
@@ -69,6 +74,44 @@ def _fingerprint(path: Path, dataset: Any) -> str:
     return digest.hexdigest()
 
 
+def _overview_factors(width: int, height: int) -> List[int]:
+    factors: List[int] = []
+    factor = 2
+    while math.ceil(width / factor) > TILE_SIZE or math.ceil(height / factor) > TILE_SIZE:
+        factors.append(factor)
+        factor *= 2
+    factors.append(factor)
+    return factors
+
+
+def _has_overview_factor(existing: Sequence[int], desired: int) -> bool:
+    tolerance = max(1, round(desired * 0.02))
+    return any(abs(actual - desired) <= tolerance for actual in existing)
+
+
+def _ensure_overviews(path: Path, source_kind: str) -> Optional[str]:
+    if not BUILD_OVERVIEWS:
+        return None
+    try:
+        with _OVERVIEW_BUILD_LOCK:
+            with rasterio.open(str(path), "r+") as dataset:
+                if dataset.width * dataset.height < OVERVIEW_MIN_PIXELS:
+                    return None
+                desired = _overview_factors(dataset.width, dataset.height)
+                existing = dataset.overviews(1) if dataset.count else []
+                if all(_has_overview_factor(existing, factor) for factor in desired):
+                    return None
+                auto_dsm = dataset.count == 1 and dataset.dtypes[0] != "uint8"
+                is_dsm = source_kind == "dsm" or (source_kind == "auto" and auto_dsm)
+                resampling = Resampling.average if is_dsm else Resampling.bilinear
+                with rasterio.Env(COMPRESS_OVERVIEW="DEFLATE", GDAL_TIFF_OVR_BLOCKSIZE="256"):
+                    dataset.build_overviews(desired, resampling)
+                    dataset.update_tags(ns="rio_overview", resampling=resampling.name)
+        return None
+    except Exception as exc:
+        return str(exc)
+
+
 class GeoTiffProvider:
     """Owns one raster and serves exact transforms plus bounded overview tiles."""
 
@@ -88,6 +131,8 @@ class GeoTiffProvider:
         self._elev_max = 1.0
         self._nodata: Optional[float] = None
         self._terrain_lut: Optional["np.ndarray"] = None
+        self._overview_factors: List[int] = []
+        self._overview_error: Optional[str] = None
 
     @property
     def loaded(self) -> bool:
@@ -111,6 +156,7 @@ class GeoTiffProvider:
         if source_kind not in {"auto", "dom", "dsm"}:
             raise ValueError(f"不支持的数据源角色: {source_kind}")
 
+        overview_error = _ensure_overviews(path, source_kind)
         try:
             dataset = rasterio.open(str(path))
         except Exception as exc:
@@ -166,9 +212,12 @@ class GeoTiffProvider:
                 self._is_dsm = is_dsm
                 self._elev_min, self._elev_max = elev_min, elev_max
                 self._nodata = nodata
+                self._overview_factors = list(dataset.overviews(1)) if dataset.count else []
+                self._overview_error = overview_error
                 if is_dsm and self._terrain_lut is None:
                     self._terrain_lut = _build_lut()
                 self._get_tile_png.cache_clear()
+                self.get_full_image.cache_clear()
                 if previous is not None:
                     try:
                         previous.close()
@@ -187,9 +236,14 @@ class GeoTiffProvider:
             base: Dict[str, Any] = {
                 "loaded": True, "crs": self._native_crs, "bounds": dict(self._bounds or {}),
                 "width": self._width, "height": self._height, "tileSize": TILE_SIZE,
+                "tileCacheItems": TILE_CACHE_ITEMS,
                 "tileCols": self._levels[0]["tileCols"], "tileRows": self._levels[0]["tileRows"],
                 "levels": [dict(level) for level in self._levels],
                 "fingerprint": self._fingerprint, "isDsm": self._is_dsm,
+                "filename": self._path.name if self._path is not None else None,
+                "overviewFactors": list(self._overview_factors),
+                "overviewReady": not self._overview_error and bool(self._overview_factors),
+                "overviewError": self._overview_error,
             }
             if self._is_dsm:
                 base["elevation"] = {
@@ -258,7 +312,7 @@ class GeoTiffProvider:
                 "elevation": round(float(value), 3), "unit": "m",
             }
 
-    @lru_cache(maxsize=384)
+    @lru_cache(maxsize=TILE_CACHE_ITEMS)
     def _get_tile_png(self, level: int, col: int, row: int) -> Optional[bytes]:
         with self._lock:
             dataset = self._dataset
@@ -294,6 +348,7 @@ class GeoTiffProvider:
         image.save(buffer, format="PNG", optimize=False)
         return buffer.getvalue()
 
+    @lru_cache(maxsize=4)
     def get_full_image(self, max_dim: int = 0) -> Optional[bytes]:
         """Render the entire raster as a single PNG.
 
@@ -348,6 +403,7 @@ class GeoTiffProvider:
                 finally:
                     self._dataset = None
             self._get_tile_png.cache_clear()
+            self.get_full_image.cache_clear()
 
     def _require_dataset(self) -> Any:
         if self._dataset is None:

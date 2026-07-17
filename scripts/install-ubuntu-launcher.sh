@@ -30,14 +30,18 @@ if [[ ! -f "$CONFIG_FILE" ]]; then
 SKYFORGE_MODE=auto
 SKYFORGE_HOST=127.0.0.1
 SKYFORGE_PORT=3000
+SKYFORGE_BUILD_OVERVIEWS=1
+SKYFORGE_OVERVIEW_MIN_PIXELS=16777216
 
 # Uncomment and edit these values on the ROS Noetic workstation.
 # SKYFORGE_LAUNCH_PACKAGE=your_localization_pkg
 # SKYFORGE_LAUNCH_FILE=localization.launch
 # SKYFORGE_LAUNCH_ARGS="map:=/absolute/path/to/map.yaml"
+# SKYFORGE_GLOBALPOSE_TOPIC=/self_state/globalpose
 # SKYFORGE_FIX_TOPIC=/fix
 # SKYFORGE_ODOM_TOPIC=/odom
 # SKYFORGE_REGION_TOPIC=/selected_region
+# SKYFORGE_MAP_STORE_DIR=/home/your-user/skyforge-maps
 # SKYFORGE_EXTRA_SETUP=/home/your-user/catkin_ws/devel/setup.bash
 
 # Optional explicit executable paths.

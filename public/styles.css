@@ -37,9 +37,12 @@
 
 html,
 body {
+  position: fixed;
+  inset: 0;
   width: 100%;
   height: 100%;
   margin: 0;
+  overscroll-behavior: none;
 }
 
 body {
@@ -97,10 +100,13 @@ textarea:focus-visible {
 }
 
 .app-shell {
-  position: relative;
-  height: 100vh;
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   display: grid;
   grid-template-rows: 48px minmax(0, 1fr);
+  overflow: hidden;
   isolation: isolate;
 }
 
@@ -274,6 +280,7 @@ textarea:focus-visible {
   min-height: 0;
   display: grid;
   grid-template-columns: 56px minmax(600px, 1fr) minmax(352px, 384px);
+  overflow: hidden;
   background: var(--bg-secondary);
 }
 
@@ -583,7 +590,6 @@ textarea:focus-visible {
   width: 1600px;
   height: 1000px;
   transform-origin: 0 0;
-  will-change: transform;
 }
 
 .map-image,
@@ -609,6 +615,7 @@ textarea:focus-visible {
 }
 
 .map-content[data-source-mode="geotiff"] .geotiff-tile {
+  z-index: 1;
   object-fit: fill;
   opacity: 1;
   background: transparent;
@@ -616,6 +623,12 @@ textarea:focus-visible {
   filter: none;
   image-rendering: auto;
   transition: none;
+}
+
+.map-content[data-source-mode="geotiff"] .geotiff-overview {
+  z-index: 0;
+  object-fit: fill;
+  filter: none;
 }
 
 .map-content[data-source-mode="geotiff"] .geotiff-tile:not(.tile-ready) {
@@ -1477,7 +1490,7 @@ textarea:focus {
   }
 }
 
-@media (max-width: 1060px) {
+@media (max-width: 960px) {
   body {
     overflow: auto;
   }
@@ -1950,6 +1963,121 @@ textarea:focus {
   background-size: 64px 64px;
 }
 
+.region-confirm-dialog {
+  width: min(520px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  margin: auto;
+  padding: 0;
+  overflow: hidden;
+  color: var(--text);
+  border: 1px solid rgba(85, 184, 232, 0.34);
+  border-radius: 8px;
+  background: #0d1a24;
+  box-shadow: 0 22px 70px rgba(0, 0, 0, 0.52);
+}
+
+.region-confirm-dialog::backdrop {
+  background: rgba(2, 8, 13, 0.78);
+}
+
+.region-confirm-form {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+
+.region-confirm-form header,
+.region-confirm-form footer,
+.region-confirm-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.region-confirm-form header > div {
+  display: grid;
+  gap: 4px;
+}
+
+.region-confirm-form header span,
+.region-confirm-meta,
+.region-name-field > span {
+  color: var(--text-muted);
+  font-family: var(--mono-font);
+  font-size: 9px;
+  letter-spacing: 0;
+}
+
+.region-confirm-form header strong {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.dialog-close {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #13232f;
+  font-size: 20px;
+  line-height: 1;
+}
+
+.dialog-close:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+  background: #1a2d3a;
+}
+
+.region-confirm-meta {
+  padding: 8px 10px;
+  border-left: 2px solid var(--accent);
+  background: #122431;
+}
+
+.region-name-field {
+  display: grid;
+  gap: 7px;
+}
+
+.region-name-field input {
+  width: 100%;
+  height: 38px;
+  padding: 0 11px;
+  color: var(--text);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: #08131c;
+  font-family: var(--mono-font);
+}
+
+.region-confirm-coordinates {
+  min-height: 156px;
+  max-height: 260px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  color: var(--accent-highlight);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #07121a;
+  font-family: var(--mono-font);
+  font-size: 10px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.region-confirm-form footer {
+  justify-content: flex-end;
+}
+
+.region-confirm-form footer button {
+  min-width: 96px;
+}
+
 @media (max-width: 1320px) {
   .vehicle-hud {
     grid-template-columns: 150px minmax(285px, 1.5fr) minmax(260px, 1.3fr) 130px;
@@ -1968,10 +2096,6 @@ textarea:focus {
 }
 
 @media (max-width: 1060px) {
-  .main-column {
-    min-height: 720px;
-  }
-
   .vehicle-hud {
     grid-template-columns: 130px 1.6fr 1.4fr 120px;
   }

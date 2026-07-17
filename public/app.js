@@ -10,13 +10,15 @@ const elements = {
   domZoomValue: $("#domZoomValue"), domExpandButton: $("#domExpandButton"),
   domFileInput: $("#domFileInput"),
   dsmFileButton: $("#dsmFileButton"), dsmFitButton: $("#dsmFitButton"), dsmLocateButton: $("#dsmLocateButton"),
+  dsmRectButton: $("#dsmRectButton"),
   dsmZoomOutButton: $("#dsmZoomOutButton"), dsmNativeButton: $("#dsmNativeButton"), dsmZoomInButton: $("#dsmZoomInButton"),
   dsmZoomValue: $("#dsmZoomValue"), dsmExpandButton: $("#dsmExpandButton"),
   dsmFileInput: $("#dsmFileInput"),
   mapWorkspace: $(".dual-map-workspace"),
   mapViewport: $("#mapViewport"), mapContent: $("#mapContent"), vectorLayer: $("#vectorLayer"),
   dsmViewport: $("#dsmViewport"), dsmContent: $("#dsmContent"), dsmVectorLayer: $("#dsmVectorLayer"),
-  drawHint: $("#drawHint"), cursorReadout: $("#cursorReadout"), dsmCursorReadout: $("#dsmCursorReadout"),
+  drawHint: $("#drawHint"), dsmDrawHint: $("#dsmDrawHint"),
+  cursorReadout: $("#cursorReadout"), dsmCursorReadout: $("#dsmCursorReadout"),
   domMapMeta: $("#domMapMeta"), dsmMapMeta: $("#dsmMapMeta"), dsmRangeValue: $("#dsmRangeValue"),
   groundElevationValue: $("#groundElevationValue"), flagSelect: $("#flagSelect"),
   regionSelect: $("#regionSelect"), deleteRegionButton: $("#deleteRegionButton"), topicInput: $("#topicInput"),
@@ -29,12 +31,18 @@ const elements = {
   runAgentButton: $("#runAgentButton"), agentOutput: $("#agentOutput"), topicName: $("#topicName"),
   latValue: $("#latValue"), lonValue: $("#lonValue"), altValue: $("#altValue"),
   headingValue: $("#headingValue"), speedValue: $("#speedValue"), sourceValue: $("#sourceValue"),
-  regionReadout: $("#regionReadout"), eventLog: $("#eventLog")
+  regionReadout: $("#regionReadout"), eventLog: $("#eventLog"),
+  regionConfirmDialog: $("#regionConfirmDialog"), pendingRegionSource: $("#pendingRegionSource"),
+  pendingRegionName: $("#pendingRegionName"), pendingRegionCoordinates: $("#pendingRegionCoordinates"),
+  confirmRegionButton: $("#confirmRegionButton")
 };
 
 const TILE_SIZE = 256;
 const MAX_HISTORY = 240;
-const MAX_VISIBLE_TILES = 200;
+const MAX_VISIBLE_TILES = 144;
+const DEFAULT_CACHED_TILE_NODES = 192;
+const TILE_REFRESH_DELAY_MS = 150;
+const UI_PREFERENCES_KEY = "skyforge-ui-preferences-v1";
 const MIN_MAP_SCALE = 0.0001;
 const MAX_MAP_SCALE = 32;
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -56,11 +64,11 @@ const state = {
   dsmSource: createSource("dsm-empty"),
   dsmView: { x: 0, y: 0, scale: 1 },
   dsmDrag: null,
-  regions: [], selectedRegionId: "", drawMode: null, selectionEl: null,
+  regions: [], selectedRegionId: "", drawKind: null, drawMode: null, selectionEl: null,
   polygonPoints: [], polygonCursor: null, latestTelemetry: null, telemetryHistory: [],
   publishing: false, publishingStatus: null, localizationRunning: false,
   localizationStatus: null, system: null, uploading: { dom: false, dsm: false },
-  focusedMap: null
+  focusedMap: null, pendingRegion: null
 };
 
 const trajectoryNodes = { dom: null, dsm: null };
@@ -68,7 +76,11 @@ const trajectoryProjection = {
   dom: { fingerprint: null, pixels: new Map(), pending: new Set(), timer: 0, controller: null, requestId: 0 },
   dsm: { fingerprint: null, pixels: new Map(), pending: new Set(), timer: 0, controller: null, requestId: 0 }
 };
-const tileRefreshRaf = { dom: 0, dsm: 0 };
+const tileRefreshTimers = { dom: 0, dsm: 0 };
+const wheelZoomState = {
+  dom: { frame: 0, delta: 0, anchor: null },
+  dsm: { frame: 0, delta: 0, anchor: null }
+};
 let trajectoryRaf = 0;
 let telemetrySequence = 0;
 let domPointerTimer = 0;
@@ -96,13 +108,16 @@ function scheduleTrajectoryUpdate() {
 
 init();
 
-function init() {
-  renderOnlineTiles();
+async function init() {
+  if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+  window.scrollTo(0, 0);
+  restoreUiPreferences();
   ensureDsmVectorLayer();
   bindEvents();
   connectEvents();
-  loadRegions();
-  loadSystemStatus();
+  await Promise.all([loadRegions(), loadSystemStatus()]);
+  const restoredMaps = await restorePersistedMaps();
+  if (!restoredMaps.dom) renderOnlineTiles();
   updateClock();
   window.setInterval(updateClock, 1000);
   requestAnimationFrame(() => {
@@ -131,8 +146,9 @@ function bindEvents() {
   on(elements.dsmZoomInButton, "click", () => zoomBy("dsm", 1.25));
   on(elements.domExpandButton, "click", () => toggleMapFocus("dom"));
   on(elements.dsmExpandButton, "click", () => toggleMapFocus("dsm"));
-  on(elements.rectButton, "click", () => toggleDrawMode("rectangle"));
-  on(elements.polygonButton, "click", () => toggleDrawMode("polygon"));
+  on(elements.rectButton, "click", () => toggleDrawMode("dom", "rectangle"));
+  on(elements.polygonButton, "click", () => toggleDrawMode("dom", "polygon"));
+  on(elements.dsmRectButton, "click", () => toggleDrawMode("dsm", "rectangle"));
 
   on(elements.mapViewport, "mousedown", onPointerDown);
   on(elements.mapViewport, "mousemove", onPointerMove);
@@ -150,47 +166,128 @@ function bindEvents() {
       fitView("dsm");
     }
   });
+  on(window, "scroll", () => {
+    if (window.scrollX || window.scrollY) window.scrollTo(0, 0);
+  }, { passive: true });
   on(window, "keydown", (event) => {
     if (event.key === "Escape" && state.focusedMap) toggleMapFocus(state.focusedMap);
   });
 
   on(elements.regionSelect, "change", () => {
     state.selectedRegionId = elements.regionSelect.value;
+    saveUiPreferences();
     elements.deleteRegionButton.disabled = !state.selectedRegionId;
     renderSavedRegions();
     updateRegionReadout();
   });
   on(elements.flagSelect, "change", () => {
+    saveUiPreferences();
     updateRegionReadout();
     addLog(`切换标识位: ${elements.flagSelect.value}`);
   });
-  on(elements.topicInput, "input", updateRegionReadout);
+  on(elements.topicInput, "input", () => {
+    saveUiPreferences();
+    updateRegionReadout();
+  });
+  on(elements.graphEndpoint, "input", saveUiPreferences);
+  on(elements.agentType, "change", saveUiPreferences);
   on(elements.deleteRegionButton, "click", deleteSelectedRegion);
   on(elements.publishButton, "click", startPublishing);
   on(elements.stopButton, "click", stopPublishing);
   on(elements.startLocButton, "click", toggleLocalization);
   on(elements.runAgentButton, "click", runAgent);
+  on(elements.confirmRegionButton, "click", validatePendingRegionName);
+  on(elements.regionConfirmDialog, "close", handleRegionDialogClose);
+  on(elements.regionConfirmDialog, "cancel", () => {
+    state.pendingRegion = null;
+  });
 }
 
-function toggleDrawMode(mode) {
-  const nextMode = state.drawMode === mode ? null : mode;
+function restoreUiPreferences() {
+  try {
+    const preferences = JSON.parse(localStorage.getItem(UI_PREFERENCES_KEY) || "{}");
+    if (preferences.flag && elements.flagSelect) elements.flagSelect.value = preferences.flag;
+    if (typeof preferences.topic === "string" && elements.topicInput) elements.topicInput.value = preferences.topic;
+    if (typeof preferences.graphEndpoint === "string" && elements.graphEndpoint) {
+      elements.graphEndpoint.value = preferences.graphEndpoint;
+    }
+    if (preferences.agentType && elements.agentType) elements.agentType.value = preferences.agentType;
+    if (typeof preferences.selectedRegionId === "string") state.selectedRegionId = preferences.selectedRegionId;
+  } catch {
+    localStorage.removeItem(UI_PREFERENCES_KEY);
+  }
+}
+
+function saveUiPreferences() {
+  try {
+    localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify({
+      flag: elements.flagSelect?.value || "GPS_FLAG",
+      topic: elements.topicInput?.value || "/selected_region",
+      graphEndpoint: elements.graphEndpoint?.value || "",
+      agentType: elements.agentType?.value || "agent",
+      selectedRegionId: elements.regionSelect?.value || state.selectedRegionId || ""
+    }));
+  } catch {
+    // Local storage can be unavailable in hardened browser profiles.
+  }
+}
+
+async function restorePersistedMaps() {
+  const restored = { dom: false, dsm: false };
+  try {
+    const response = await fetch("/api/maps/status", { headers: { accept: "application/json" } });
+    const maps = await readApiResponse(response);
+    for (const kind of ["dom", "dsm"]) {
+      const metadata = maps[kind];
+      if (!metadata?.loaded) continue;
+      renderGeoTiff(kind, metadata);
+      const filename = metadata.filename || `${kind}.tif`;
+      const metaElement = kind === "dsm" ? elements.dsmMapMeta : elements.domMapMeta;
+      if (metaElement) {
+        metaElement.textContent = `${filename} · ${metadata.width}×${metadata.height}`;
+        metaElement.title = filename;
+      }
+      restored[kind] = true;
+      addLog(`${labelForMap(kind)} 已从持久化存储恢复: ${filename}`);
+    }
+  } catch (error) {
+    addLog(`地图恢复失败: ${error.message}`);
+  }
+  return restored;
+}
+
+function toggleDrawMode(kind, mode) {
+  const isSameMode = state.drawKind === kind && state.drawMode === mode;
+  const nextMode = isSameMode ? null : mode;
+  if (nextMode && !mapParts(kind).source.loaded) {
+    setUploadStatus(kind, `请先加载 ${labelForMap(kind)} 地图`, true);
+    return;
+  }
   cancelDraft();
+  state.drawKind = nextMode ? kind : null;
   state.drawMode = nextMode;
-  elements.rectButton.classList.toggle("active", nextMode === "rectangle");
-  elements.polygonButton.classList.toggle("active", nextMode === "polygon");
-  elements.mapViewport.classList.toggle("selecting", Boolean(nextMode));
-  elements.drawHint.hidden = nextMode !== "polygon";
-  if (nextMode === "rectangle") addLog("矩形模式：按住左键拖动创建区域");
-  if (nextMode === "polygon") addLog("多边形模式：左键添加顶点，双击闭合");
+  elements.rectButton.classList.toggle("active", kind === "dom" && nextMode === "rectangle");
+  elements.polygonButton.classList.toggle("active", kind === "dom" && nextMode === "polygon");
+  elements.dsmRectButton?.classList.toggle("active", kind === "dsm" && nextMode === "rectangle");
+  elements.mapViewport.classList.toggle("selecting", kind === "dom" && Boolean(nextMode));
+  elements.dsmViewport.classList.toggle("selecting", kind === "dsm" && Boolean(nextMode));
+  elements.drawHint.hidden = !(kind === "dom" && nextMode === "polygon");
+  elements.dsmDrawHint.hidden = !(kind === "dsm" && nextMode === "rectangle");
+  if (nextMode === "rectangle") addLog(`${labelForMap(kind)} 矩形模式：按住左键拖动，松开后确认`);
+  if (nextMode === "polygon") addLog("DOM 多边形模式：左键添加顶点，双击闭合");
 }
 
 function cancelDraft() {
   state.drag = null;
+  state.dsmDrag = null;
+  elements.mapViewport?.classList.remove("dragging");
+  elements.dsmViewport?.classList.remove("dragging");
   state.polygonPoints = [];
   state.polygonCursor = null;
   state.selectionEl?.remove();
   state.selectionEl = null;
-  renderVectorLayer();
+  renderVectorLayer("dom");
+  renderVectorLayer("dsm");
 }
 
 function renderOnlineTiles() {
@@ -348,6 +445,13 @@ function renderGeoTiff(kind, meta) {
     metadata: meta,
     levels: normalizeOverviewLevels(meta, width, height),
     tileNodes: new Map(),
+    activeTileKeys: new Set(),
+    tileUseCounter: 0,
+    maxCachedTileNodes: clamp(
+      Math.floor((Number(meta.tileCacheItems) || DEFAULT_CACHED_TILE_NODES * 4) / 4),
+      96,
+      256
+    ),
     currentLevel: null
   };
   if (isDsm) state.dsmSource = source;
@@ -357,10 +461,24 @@ function renderGeoTiff(kind, meta) {
   content.dataset.sourceMode = "geotiff";
   content.style.width = `${width}px`;
   content.style.height = `${height}px`;
+  const overview = document.createElement("img");
+  overview.className = "map-image geotiff-overview";
+  overview.alt = "";
+  overview.loading = "eager";
+  overview.decoding = "async";
+  Object.assign(overview.style, {
+    left: "0",
+    top: "0",
+    width: `${width}px`,
+    height: `${height}px`
+  });
+  overview.src = `/api/map/${kind}/full.png?max_dim=2048&v=${encodeURIComponent(fingerprint)}`;
+  content.append(overview);
   handleMapSourceChanged(kind);
 
   if (isDsm) {
     ensureDsmVectorLayer();
+    renderSavedRegions();
     const elevation = meta.elevation || {};
     const min = toFiniteNumber(elevation.min);
     const max = toFiniteNumber(elevation.max);
@@ -376,7 +494,7 @@ function renderGeoTiff(kind, meta) {
     elements.domMapMeta.textContent = `${width}×${height} · ${meta.crs || "UNKNOWN"}`;
     setMapReady(`DOM 已加载 · ${width}×${height} 原始分辨率`);
   }
-  scheduleTileRefresh(kind);
+  scheduleTileRefresh(kind, 0);
   scheduleTrajectoryUpdate();
 }
 
@@ -403,13 +521,14 @@ function isGeoTiffSource(source) {
   return Boolean(source?.loaded && String(source.type).startsWith("geotiff-"));
 }
 
-function scheduleTileRefresh(kind) {
+function scheduleTileRefresh(kind, delay = TILE_REFRESH_DELAY_MS) {
   const source = mapParts(kind).source;
-  if (!isGeoTiffSource(source) || tileRefreshRaf[kind]) return;
-  tileRefreshRaf[kind] = requestAnimationFrame(() => {
-    tileRefreshRaf[kind] = 0;
+  if (!isGeoTiffSource(source)) return;
+  window.clearTimeout(tileRefreshTimers[kind]);
+  tileRefreshTimers[kind] = window.setTimeout(() => {
+    tileRefreshTimers[kind] = 0;
     refreshGeoTiffTiles(kind);
-  });
+  }, Math.max(0, delay));
 }
 
 function visibleTileRange(kind, level) {
@@ -486,6 +605,12 @@ function chooseOverviewLevel(kind) {
   const { source, view } = mapParts(kind);
   const levels = source.levels || [];
   if (!levels.length) return null;
+  const current = levels.find((level) => level.level === source.currentLevel);
+  if (current && visibleTileCount(kind, current) <= MAX_VISIBLE_TILES) {
+    const renderedPixelSize = current.factor * view.scale;
+    // Wider hysteresis band to prevent rapid level switching during continuous zoom
+    if (renderedPixelSize >= 0.4 && renderedPixelSize <= 2.5) return current;
+  }
   let index = levels.reduce((best, level, candidate) => {
     const distance = Math.abs(Math.log(Math.max(level.factor * view.scale, 0.000001)));
     const bestDistance = Math.abs(Math.log(Math.max(levels[best].factor * view.scale, 0.000001)));
@@ -502,35 +627,59 @@ function refreshGeoTiffTiles(kind) {
   if (!level) return;
   const batchId = (source.tileBatchId || 0) + 1;
   source.tileBatchId = batchId;
-  content.dataset.rasterLevel = String(level.level);
-  content.dataset.rasterFactor = String(level.factor);
   const wantedTiles = visibleTilesForLevel(kind, level);
   const wantedKeys = new Set(wantedTiles.map(({ col, row }) => `${level.level}:${col}:${row}`));
-  const levelChanged = source.currentLevel !== null && source.currentLevel !== level.level;
-  const pruneStaleTiles = () => {
-    for (const [key, node] of source.tileNodes) {
-      if (!wantedKeys.has(key)) {
-        node.remove();
-        source.tileNodes.delete(key);
-      }
-    }
-  };
+  cancelStalePendingTiles(source, wantedKeys);
 
-  // Keep the previous overview level visible until every replacement tile is ready.
-  if (!levelChanged) pruneStaleTiles();
+  // Collect old-level tiles that are already visible so we can keep them as a
+  // backdrop while new tiles load, preventing black flicker on level switch.
+  const previousActiveKeys = source.activeTileKeys || new Set();
+  const staleFallbackKeys = new Set();
+  for (const key of previousActiveKeys) {
+    if (wantedKeys.has(key)) continue;
+    const node = source.tileNodes.get(key);
+    if (node && node.classList.contains("tile-ready")) {
+      staleFallbackKeys.add(key);
+    }
+  }
 
   const overlay = content.querySelector(".vector-layer, .saved-region, .selection-box");
   let pending = 0;
   let failed = false;
   const finishBatch = () => {
     if (pending || failed || source.tileBatchId !== batchId) return;
-    pruneStaleTiles();
+    for (const [key, node] of source.tileNodes) {
+      const active = wantedKeys.has(key);
+      node.hidden = !active;
+      node.dataset.active = active ? "true" : "false";
+    }
+    // Now that all wanted tiles are ready, remove stale fallback tiles
+    for (const key of staleFallbackKeys) {
+      const node = source.tileNodes.get(key);
+      if (node) {
+        node.hidden = true;
+        node.dataset.active = "false";
+      }
+    }
+    source.activeTileKeys = wantedKeys;
     source.currentLevel = level.level;
+    content.dataset.rasterLevel = String(level.level);
+    content.dataset.rasterFactor = String(level.factor);
+    evictHiddenTileNodes(source, wantedKeys);
   };
+  // While new tiles are pending, keep old-level tiles visible as fallback
+  for (const key of staleFallbackKeys) {
+    const node = source.tileNodes.get(key);
+    if (node) {
+      node.hidden = false;
+      node.dataset.active = "true";
+    }
+  }
   for (const { col, row } of wantedTiles) {
     const key = `${level.level}:${col}:${row}`;
     const existing = source.tileNodes.get(key);
     if (existing) {
+      touchTileNode(source, existing);
       if (!existing.classList.contains("tile-ready")) {
         pending += 1;
         let settled = false;
@@ -538,12 +687,18 @@ function refreshGeoTiffTiles(kind) {
           if (settled) return;
           settled = true;
           pending -= 1;
+          if (existing.dataset.cancelled === "true") {
+            finishBatch();
+            return;
+          }
           if (success) {
             existing.classList.add("tile-ready");
+            source.tileRetryCounts?.delete(key);
           } else {
             failed = true;
             source.tileNodes.delete(key);
             existing.remove();
+            scheduleTileRetry(kind, source, key);
           }
           finishBatch();
         };
@@ -560,6 +715,7 @@ function refreshGeoTiffTiles(kind) {
     if (width <= 0 || height <= 0 || left >= source.width || top >= source.height) continue;
     const img = document.createElement("img");
     img.className = "tile-img geotiff-tile";
+    img.hidden = true;
     img.loading = "eager";
     img.decoding = "async";
     img.alt = "";
@@ -575,13 +731,19 @@ function refreshGeoTiffTiles(kind) {
       if (settled) return;
       settled = true;
       pending -= 1;
+      if (img.dataset.cancelled === "true") {
+        finishBatch();
+        return;
+      }
       if (success) {
         img.classList.add("tile-ready");
+        source.tileRetryCounts?.delete(key);
       } else {
         failed = true;
         img.classList.add("tile-error");
         source.tileNodes.delete(key);
         img.remove();
+        scheduleTileRetry(kind, source, key);
       }
       finishBatch();
     };
@@ -589,10 +751,48 @@ function refreshGeoTiffTiles(kind) {
     img.addEventListener("error", () => settle(false), { once: true });
     content.insertBefore(img, overlay);
     source.tileNodes.set(key, img);
+    touchTileNode(source, img);
     img.src = `/api/map/${kind}/tile/${encodeURIComponent(level.level)}/${col}/${row}.png?v=${encodeURIComponent(source.fingerprint)}`;
     if (img.complete) queueMicrotask(() => settle(img.naturalWidth > 0));
   }
   finishBatch();
+}
+
+function cancelStalePendingTiles(source, wantedKeys) {
+  for (const [key, node] of source.tileNodes) {
+    if (wantedKeys.has(key) || node.classList.contains("tile-ready")) continue;
+    node.dataset.cancelled = "true";
+    node.removeAttribute("src");
+    node.remove();
+    source.tileNodes.delete(key);
+    source.tileRetryCounts?.delete(key);
+  }
+}
+
+function touchTileNode(source, node) {
+  source.tileUseCounter = (source.tileUseCounter || 0) + 1;
+  node.dataset.lastUsed = String(source.tileUseCounter);
+}
+
+function evictHiddenTileNodes(source, protectedKeys) {
+  const cacheLimit = source.maxCachedTileNodes || DEFAULT_CACHED_TILE_NODES;
+  if (source.tileNodes.size <= cacheLimit) return;
+  const candidates = [...source.tileNodes.entries()]
+    .filter(([key, node]) => !protectedKeys.has(key) && node.hidden)
+    .sort((left, right) => Number(left[1].dataset.lastUsed || 0) - Number(right[1].dataset.lastUsed || 0));
+  for (const [key, node] of candidates) {
+    if (source.tileNodes.size <= cacheLimit) break;
+    node.remove();
+    source.tileNodes.delete(key);
+    source.tileRetryCounts?.delete(key);
+  }
+}
+
+function scheduleTileRetry(kind, source, key) {
+  if (!source.tileRetryCounts) source.tileRetryCounts = new Map();
+  const attempts = (source.tileRetryCounts.get(key) || 0) + 1;
+  source.tileRetryCounts.set(key, attempts);
+  if (attempts <= 2) scheduleTileRefresh(kind, 250 * attempts);
 }
 
 function labelForMap(kind) {
@@ -744,11 +944,26 @@ function fitView(kind = "dom") {
 function applyTransform(kind = "dom") {
   const { content, view } = mapParts(kind);
   if (!content) return;
+  constrainViewToViewport(kind);
   content.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
   content.classList.toggle("native-resolution", view.scale >= 0.999);
   updateZoomIndicator(kind);
   scheduleTileRefresh(kind);
   scheduleTrajectoryUpdate();
+}
+
+function constrainViewToViewport(kind) {
+  const { source, viewport, view } = mapParts(kind);
+  const rect = viewport?.getBoundingClientRect();
+  if (!rect?.width || !rect.height || !source.width || !source.height) return;
+  const renderedWidth = source.width * view.scale;
+  const renderedHeight = source.height * view.scale;
+  view.x = renderedWidth <= rect.width
+    ? (rect.width - renderedWidth) / 2
+    : clamp(view.x, rect.width - renderedWidth, 0);
+  view.y = renderedHeight <= rect.height
+    ? (rect.height - renderedHeight) / 2
+    : clamp(view.y, rect.height - renderedHeight, 0);
 }
 
 function updateZoomIndicator(kind) {
@@ -768,7 +983,7 @@ function setScaleAtPoint(kind, nextScale, anchor = null) {
     x: (point.x - view.x) / view.scale,
     y: (point.y - view.y) / view.scale
   };
-  view.scale = clamp(nextScale, MIN_MAP_SCALE, MAX_MAP_SCALE);
+  view.scale = clamp(nextScale, getFitScale(kind), MAX_MAP_SCALE);
   view.x = point.x - contentPoint.x * view.scale;
   view.y = point.y - contentPoint.y * view.scale;
   applyTransform(kind);
@@ -861,25 +1076,25 @@ function toggleMapFocus(kind) {
 function onPointerDown(event) {
   if (event.button !== 0) return;
   const point = clampContentPoint(toContentPoint(event));
-  if (state.drawMode === "polygon") {
+  if (state.drawKind === "dom" && state.drawMode === "polygon") {
     event.preventDefault();
     if (event.detail === 1) {
       state.polygonPoints.push(point);
       state.polygonCursor = point;
-      renderVectorLayer();
+      renderVectorLayer("dom");
     }
     return;
   }
 
   elements.mapViewport?.classList.add("dragging");
-  if (state.drawMode === "rectangle") {
+  if (state.drawKind === "dom" && state.drawMode === "rectangle") {
     state.drag = { type: "select", start: point, current: point };
     state.selectionEl?.remove();
     state.selectionEl = document.createElement("div");
     state.selectionEl.className = "selection-box";
     state.selectionEl.dataset.name = "NEW REGION";
     elements.mapContent?.append(state.selectionEl);
-    updateSelectionEl();
+    updateSelectionEl("dom");
   } else {
     state.drag = { type: "pan", startClient: { x: event.clientX, y: event.clientY }, startView: { ...state.view } };
   }
@@ -888,14 +1103,14 @@ function onPointerDown(event) {
 function onPointerMove(event) {
   const point = clampContentPoint(toContentPoint(event));
   queryDomPointerCoordinates(point);
-  if (state.drawMode === "polygon" && state.polygonPoints.length) {
+  if (state.drawKind === "dom" && state.drawMode === "polygon" && state.polygonPoints.length) {
     state.polygonCursor = point;
-    renderVectorLayer();
+    renderVectorLayer("dom");
   }
   if (!state.drag) return;
   if (state.drag.type === "select") {
     state.drag.current = point;
-    updateSelectionEl();
+    updateSelectionEl("dom");
   } else {
     state.view.x = state.drag.startView.x + event.clientX - state.drag.startClient.x;
     state.view.y = state.drag.startView.y + event.clientY - state.drag.startClient.y;
@@ -905,42 +1120,67 @@ function onPointerMove(event) {
 
 function onDsmPointerDown(event) {
   if (event.button !== 0) return;
+  const point = clampContentPointForSource(toContentPointForMap(event, "dsm"), state.dsmSource);
   elements.dsmViewport?.classList.add("dragging");
-  state.dsmDrag = {
-    startClient: { x: event.clientX, y: event.clientY },
-    startView: { ...state.dsmView }
-  };
+  if (state.drawKind === "dsm" && state.drawMode === "rectangle") {
+    state.dsmDrag = { type: "select", start: point, current: point };
+    state.selectionEl?.remove();
+    state.selectionEl = document.createElement("div");
+    state.selectionEl.className = "selection-box";
+    state.selectionEl.dataset.name = "NEW REGION";
+    elements.dsmContent?.append(state.selectionEl);
+    updateSelectionEl("dsm");
+  } else {
+    state.dsmDrag = {
+      type: "pan",
+      startClient: { x: event.clientX, y: event.clientY },
+      startView: { ...state.dsmView }
+    };
+  }
 }
 
 function onDsmPointerMove(event) {
   const point = clampContentPointForSource(toContentPointForMap(event, "dsm"), state.dsmSource);
   queryDsmPointerElevation(point.x, point.y);
   if (!state.dsmDrag) return;
-  state.dsmView.x = state.dsmDrag.startView.x + event.clientX - state.dsmDrag.startClient.x;
-  state.dsmView.y = state.dsmDrag.startView.y + event.clientY - state.dsmDrag.startClient.y;
-  applyTransform("dsm");
+  if (state.dsmDrag.type === "select") {
+    state.dsmDrag.current = point;
+    updateSelectionEl("dsm");
+  } else {
+    state.dsmView.x = state.dsmDrag.startView.x + event.clientX - state.dsmDrag.startClient.x;
+    state.dsmView.y = state.dsmDrag.startView.y + event.clientY - state.dsmDrag.startClient.y;
+    applyTransform("dsm");
+  }
 }
 
 async function onPointerUp() {
   elements.mapViewport?.classList.remove("dragging");
   elements.dsmViewport?.classList.remove("dragging");
-  state.dsmDrag = null;
+  if (state.dsmDrag) {
+    const dsmDrag = state.dsmDrag;
+    const box = dsmDrag.type === "select" ? getSelectionBox("dsm") : null;
+    state.dsmDrag = null;
+    if (dsmDrag.type === "select") {
+      if (box && box.width >= 12 && box.height >= 12) await createRegionFromBox(box, "dsm");
+      else clearSelectionElement();
+    } else {
+      scheduleTileRefresh("dsm", 0);
+    }
+  }
   if (!state.drag) return;
   if (state.drag.type === "select") {
-    const box = getSelectionBox();
+    const box = getSelectionBox("dom");
     state.drag = null;
-    if (box && box.width >= 12 && box.height >= 12) await createRegionFromBox(box);
-    else {
-      state.selectionEl?.remove();
-      state.selectionEl = null;
-    }
+    if (box && box.width >= 12 && box.height >= 12) await createRegionFromBox(box, "dom");
+    else clearSelectionElement();
     return;
   }
   state.drag = null;
+  scheduleTileRefresh("dom", 0);
 }
 
 function onDoubleClick(event) {
-  if (state.drawMode !== "polygon") return;
+  if (state.drawKind !== "dom" || state.drawMode !== "polygon") return;
   event.preventDefault();
   event.stopPropagation();
   finishPolygon();
@@ -951,8 +1191,21 @@ function zoomMap(event, kind) {
   const { viewport, view } = mapParts(kind);
   const rect = viewport?.getBoundingClientRect();
   if (!rect) return;
-  const mouse = { x: event.clientX - rect.left, y: event.clientY - rect.top };
-  setScaleAtPoint(kind, view.scale * (event.deltaY > 0 ? 0.88 : 1.14), mouse);
+  const wheel = wheelZoomState[kind];
+  const deltaMultiplier = event.deltaMode === WheelEvent.DOM_DELTA_LINE
+    ? 16
+    : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? rect.height : 1;
+  wheel.delta += clamp(event.deltaY * deltaMultiplier, -120, 120);
+  wheel.anchor = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+  if (wheel.frame) return;
+  wheel.frame = requestAnimationFrame(() => {
+    wheel.frame = 0;
+    const delta = clamp(wheel.delta, -240, 240);
+    const anchor = wheel.anchor;
+    wheel.delta = 0;
+    wheel.anchor = null;
+    setScaleAtPoint(kind, view.scale * Math.exp(-delta * 0.0015), anchor);
+  });
 }
 
 function onWheel(event) {
@@ -965,16 +1218,16 @@ function onDsmWheel(event) {
 
 function onContextMenu(event) {
   event.preventDefault();
-  if (state.drawMode === "polygon" && state.polygonPoints.length) {
+  if (state.drawKind === "dom" && state.drawMode === "polygon" && state.polygonPoints.length) {
     state.polygonPoints.pop();
     if (!state.polygonPoints.length) state.polygonCursor = null;
-    renderVectorLayer();
+    renderVectorLayer("dom");
     addLog("已撤销最后一个多边形顶点");
   }
 }
 
-function updateSelectionEl() {
-  const box = getSelectionBox();
+function updateSelectionEl(kind) {
+  const box = getSelectionBox(kind);
   if (!box || !state.selectionEl) return;
   Object.assign(state.selectionEl.style, {
     left: `${box.left}px`,
@@ -984,27 +1237,33 @@ function updateSelectionEl() {
   });
 }
 
-function getSelectionBox() {
-  if (!state.drag?.start || !state.drag?.current) return null;
-  const left = clamp(Math.min(state.drag.start.x, state.drag.current.x), 0, state.source.width);
-  const top = clamp(Math.min(state.drag.start.y, state.drag.current.y), 0, state.source.height);
-  const right = clamp(Math.max(state.drag.start.x, state.drag.current.x), 0, state.source.width);
-  const bottom = clamp(Math.max(state.drag.start.y, state.drag.current.y), 0, state.source.height);
+function getSelectionBox(kind) {
+  const drag = kind === "dsm" ? state.dsmDrag : state.drag;
+  const source = mapParts(kind).source;
+  if (!drag?.start || !drag?.current) return null;
+  const left = clamp(Math.min(drag.start.x, drag.current.x), 0, source.width);
+  const top = clamp(Math.min(drag.start.y, drag.current.y), 0, source.height);
+  const right = clamp(Math.max(drag.start.x, drag.current.x), 0, source.width);
+  const bottom = clamp(Math.max(drag.start.y, drag.current.y), 0, source.height);
   return { left, top, width: right - left, height: bottom - top };
 }
 
-async function createRegionFromBox(box) {
+function clearSelectionElement() {
+  state.selectionEl?.remove();
+  state.selectionEl = null;
+}
+
+async function createRegionFromBox(box, kind) {
   const corners = [
     { x: box.left, y: box.top },
     { x: box.left + box.width, y: box.top },
     { x: box.left + box.width, y: box.top + box.height },
     { x: box.left, y: box.top + box.height }
   ];
-  state.selectionEl?.remove();
-  state.selectionEl = null;
+  clearSelectionElement();
   try {
-    const coordinates = await pixelsToGeographic("dom", corners);
-    const region = buildRegionBase("rectangle");
+    const coordinates = await pixelsToGeographic(kind, corners);
+    const region = buildRegionBase("rectangle", kind);
     region.pixelBox = {
       x: round(box.left, 2),
       y: round(box.top, 2),
@@ -1012,7 +1271,7 @@ async function createRegionFromBox(box) {
       height: round(box.height, 2)
     };
     region.bbox = geographicBounds(coordinates);
-    await saveRegion(region);
+    await requestRegionConfirmation(region);
   } catch (error) {
     if (error.name !== "AbortError" && error.name !== "StaleMapError") {
       addLog(`区域坐标转换失败: ${error.message}`);
@@ -1028,14 +1287,14 @@ async function finishPolygon() {
   }
   state.polygonPoints = [];
   state.polygonCursor = null;
-  renderVectorLayer();
+  renderVectorLayer("dom");
   try {
     const coordinates = await pixelsToGeographic("dom", points);
-    const region = buildRegionBase("polygon");
+    const region = buildRegionBase("polygon", "dom");
     region.pixelPoints = points.map((point) => ({ x: round(point.x, 2), y: round(point.y, 2) }));
-    region.polygon = coordinates.map((point) => ({ lat: round(point.lat, 7), lon: round(point.lon, 7) }));
+    region.polygon = coordinates.map(explicitGeographicCoordinate);
     region.bbox = geographicBounds(coordinates);
-    await saveRegion(region);
+    await requestRegionConfirmation(region);
   } catch (error) {
     if (error.name !== "AbortError" && error.name !== "StaleMapError") {
       addLog(`多边形坐标转换失败: ${error.message}`);
@@ -1044,41 +1303,86 @@ async function finishPolygon() {
 }
 
 function geographicBounds(coordinates) {
-  const lats = coordinates.map((point) => Number(point.lat));
-  const lons = coordinates.map((point) => Number(point.lon));
+  const lats = coordinates.map((point) => Number(point.latitude ?? point.lat));
+  const lons = coordinates.map((point) => Number(point.longitude ?? point.lon));
   return {
-    topLeft: { lat: round(Math.max(...lats), 7), lon: round(Math.min(...lons), 7) },
-    bottomRight: { lat: round(Math.min(...lats), 7), lon: round(Math.max(...lons), 7) }
+    topLeft: { latitude: round(Math.max(...lats), 7), longitude: round(Math.min(...lons), 7) },
+    bottomRight: { latitude: round(Math.min(...lats), 7), longitude: round(Math.max(...lons), 7) }
   };
 }
 
-function buildRegionBase(shape) {
+function explicitGeographicCoordinate(point) {
+  return {
+    latitude: round(Number(point.latitude ?? point.lat), 7),
+    longitude: round(Number(point.longitude ?? point.lon), 7)
+  };
+}
+
+function buildRegionBase(shape, kind) {
+  const source = mapParts(kind).source;
   return {
     id: `region-${Date.now()}`,
     name: `AREA-${String(state.regions.length + 1).padStart(3, "0")}`,
     shape,
-    sourceType: state.source.type,
-    mapFingerprint: state.source.fingerprint,
+    sourceKind: kind,
+    sourceType: source.type,
+    mapFingerprint: source.fingerprint,
     createdAt: new Date().toISOString()
   };
 }
 
-async function saveRegion(region) {
-  state.regions.push(region);
-  state.selectedRegionId = region.id;
-  renderSavedRegions();
-  renderRegionSelect();
-  updateRegionReadout();
-  addLog(`创建${region.shape === "polygon" ? "多边形" : "矩形"}区域: ${region.name}`);
+async function requestRegionConfirmation(region) {
+  state.pendingRegion = region;
+  const sourceLabel = labelForMap(region.sourceKind || "dom");
+  if (elements.pendingRegionSource) {
+    elements.pendingRegionSource.textContent = `${sourceLabel} · ${String(region.shape || "rectangle").toUpperCase()}`;
+  }
+  if (elements.pendingRegionName) elements.pendingRegionName.value = region.name;
+  if (elements.pendingRegionCoordinates) {
+    elements.pendingRegionCoordinates.textContent = JSON.stringify(
+      region.shape === "polygon" ? { polygon: region.polygon, bbox: region.bbox } : { bbox: region.bbox },
+      null,
+      2
+    );
+  }
+  if (elements.regionConfirmDialog?.showModal) {
+    elements.regionConfirmDialog.returnValue = "cancel";
+    elements.regionConfirmDialog.showModal();
+    requestAnimationFrame(() => elements.pendingRegionName?.select());
+    return;
+  }
+  const confirmed = window.confirm(`确认创建区域 ${region.name}？`);
+  state.pendingRegion = null;
+  if (confirmed) await persistRegion(region);
+}
+
+function validatePendingRegionName(event) {
+  const name = elements.pendingRegionName?.value.trim();
+  if (name) return;
+  event.preventDefault();
+  elements.pendingRegionName?.focus();
+  addLog("区域名称不能为空");
+}
+
+async function handleRegionDialogClose() {
+  const region = state.pendingRegion;
+  state.pendingRegion = null;
+  if (!region || elements.regionConfirmDialog?.returnValue !== "confirm") return;
+  region.name = elements.pendingRegionName?.value.trim() || region.name;
+  await persistRegion(region);
+}
+
+async function persistRegion(region) {
   try {
-    await postJson("/api/regions", region);
-  } catch (error) {
-    state.regions = state.regions.filter((item) => item.id !== region.id);
-    state.selectedRegionId = "";
+    const data = await postJson("/api/regions", region);
+    state.regions = Array.isArray(data.regions) ? data.regions : [...state.regions, region];
+    state.selectedRegionId = region.id;
     renderRegionSelect();
     renderSavedRegions();
     updateRegionReadout();
-    addLog(`区域保存失败，已撤销本地区域: ${error.message}`);
+    addLog(`已创建 ${labelForMap(region.sourceKind || "dom")} ${region.shape === "polygon" ? "多边形" : "矩形"}区域: ${region.name}`);
+  } catch (error) {
+    addLog(`区域保存失败: ${error.message}`);
   }
 }
 
@@ -1092,11 +1396,17 @@ function regionMatchesSource(region, source) {
 }
 
 function renderSavedRegions() {
-  elements.mapContent.querySelectorAll(".saved-region").forEach((node) => node.remove());
-  ensureVectorLayer();
-  renderVectorLayer();
+  renderSavedRegionsForMap("dom");
+  renderSavedRegionsForMap("dsm");
+}
+
+function renderSavedRegionsForMap(kind) {
+  const { content, source } = mapParts(kind);
+  if (!content) return;
+  content.querySelectorAll(".saved-region").forEach((node) => node.remove());
+  renderVectorLayer(kind);
   for (const region of state.regions) {
-    if (!region.pixelBox || !regionMatchesSource(region, state.source)) continue;
+    if (!region.pixelBox || !regionMatchesSource(region, source)) continue;
     const el = document.createElement("div");
     el.className = "saved-region";
     if (region.id === state.selectedRegionId) el.classList.add("selected");
@@ -1105,15 +1415,17 @@ function renderSavedRegions() {
     el.style.top = `${region.pixelBox.y}px`;
     el.style.width = `${region.pixelBox.width}px`;
     el.style.height = `${region.pixelBox.height}px`;
-    elements.mapContent.append(el);
+    content.append(el);
   }
 }
 
-function renderVectorLayer() {
-  const layer = ensureVectorLayer();
+function renderVectorLayer(kind = "dom") {
+  const { source, view } = mapParts(kind);
+  const layer = ensureMapVectorLayer(kind);
+  if (!layer) return;
   layer.innerHTML = "";
   for (const region of state.regions) {
-    if (!region.pixelPoints || !regionMatchesSource(region, state.source)) continue;
+    if (!region.pixelPoints || !regionMatchesSource(region, source)) continue;
     const polygon = document.createElementNS(SVG_NS, "polygon");
     polygon.setAttribute("points", region.pixelPoints.map((point) => `${point.x},${point.y}`).join(" "));
     polygon.setAttribute("class", region.id === state.selectedRegionId ? "region-poly region-poly-selected" : "region-poly");
@@ -1135,7 +1447,7 @@ function renderVectorLayer() {
     layer.append(label);
   }
 
-  if (state.polygonPoints.length) {
+  if (kind === "dom" && state.drawKind === "dom" && state.polygonPoints.length) {
     const preview = [...state.polygonPoints];
     if (state.polygonCursor) preview.push(state.polygonCursor);
     const polygon = document.createElementNS(SVG_NS, "polyline");
@@ -1146,13 +1458,13 @@ function renderVectorLayer() {
       const vertex = document.createElementNS(SVG_NS, "circle");
       vertex.setAttribute("cx", point.x);
       vertex.setAttribute("cy", point.y);
-      vertex.setAttribute("r", 4 / Math.max(state.view.scale, 0.25));
+      vertex.setAttribute("r", 4 / Math.max(view.scale, 0.25));
       vertex.setAttribute("class", "draft-vertex");
       layer.append(vertex);
     }
   }
 
-  renderTrajectoryOnMap("dom", layer);
+  renderTrajectoryOnMap(kind, layer);
 }
 
 function renderTrajectoryOnMap(kind, layer) {
@@ -1350,7 +1662,8 @@ function renderRegionSelect() {
   const options = ['<option value="">未选择</option>'];
   for (const region of state.regions) {
     const shape = region.shape === "polygon" ? "多边形" : "矩形";
-    options.push(`<option value="${escapeHtml(region.id)}">${escapeHtml(region.name)} · ${shape}</option>`);
+    const source = labelForMap(regionSourceKind(region));
+    options.push(`<option value="${escapeHtml(region.id)}">${escapeHtml(region.name)} · ${source} ${shape}</option>`);
   }
   elements.regionSelect.innerHTML = options.join("");
   if (!state.regions.some((region) => region.id === state.selectedRegionId)) {
@@ -1358,6 +1671,7 @@ function renderRegionSelect() {
   }
   elements.regionSelect.value = state.selectedRegionId;
   elements.deleteRegionButton.disabled = !state.selectedRegionId;
+  saveUiPreferences();
 }
 
 function updateRegionReadout() {
@@ -1368,20 +1682,16 @@ function updateRegionReadout() {
     return;
   }
   elements.deleteRegionButton.disabled = false;
-  elements.regionReadout.textContent = JSON.stringify(
-    {
-      name: region.name,
-      shape: region.shape || "rectangle",
-      topic: elements.topicInput.value,
-      message: {
-        flag: elements.flagSelect.value,
-        region: region.name
-      },
-      bbox: region.bbox
-    },
-    null,
-    2
-  );
+  elements.regionReadout.textContent = JSON.stringify(buildRegionMessage(region), null, 2);
+}
+
+function regionSourceKind(region) {
+  if (region?.sourceKind === "dsm" || region?.sourceKind === "dom") return region.sourceKind;
+  return String(region?.sourceType || "").includes("dsm") ? "dsm" : "dom";
+}
+
+function buildRegionMessage(region) {
+  return { flag: elements.flagSelect.value, region };
 }
 
 function getSelectedRegion() {
@@ -1399,8 +1709,7 @@ async function deleteSelectedRegion() {
   elements.deleteRegionButton.disabled = true;
   try {
     const response = await fetch(`/api/regions/${encodeURIComponent(region.id)}`, { method: "DELETE" });
-    const data = await response.json();
-    if (!response.ok || data.ok === false) throw new Error(data.error || `Request failed: ${response.status}`);
+    const data = await readApiResponse(response);
     state.regions = Array.isArray(data.regions) ? data.regions : state.regions.filter((item) => item.id !== region.id);
     state.selectedRegionId = "";
     renderRegionSelect();
@@ -1420,10 +1729,9 @@ async function startPublishing() {
     return;
   }
   const payload = {
-    flag: elements.flagSelect.value,
+    ...buildRegionMessage(region),
     topic: elements.topicInput.value.trim() || "/selected_region",
-    rateHz: 1,
-    region
+    rateHz: 1
   };
   try {
     const response = await postJson("/api/publish/start", payload);
@@ -1555,8 +1863,10 @@ function renderSystemStatus(system) {
       ? ros.nodeName || "skyforge_gateway"
       : "NOT STARTED";
   elements.rosNodeValue.title = ros.lastError || "";
-  elements.messageTypeValue.textContent = ros.messageType || "--";
-  elements.messageTypeValue.title = ros.messageType || "";
+  const trajectoryType = ros.trajectoryMessageType || "--";
+  const regionType = ros.messageType || "--";
+  elements.messageTypeValue.textContent = `${trajectoryType.split("/").pop()} + ${regionType.split("/").pop()}`;
+  elements.messageTypeValue.title = `轨迹: ${trajectoryType}\n区域: ${regionType}`;
   if (system.localization) updateLocalizationUi(system.localization);
 }
 
@@ -1698,7 +2008,7 @@ function updateTelemetry(data) {
     heading: toFiniteNumber(data.heading),
     speed: toFiniteNumber(data.speed)
   };
-  if (sample.lat !== null && sample.lon !== null) {
+  if (sample.lat !== null && sample.lon !== null && data.positionUpdate !== false) {
     state.telemetryHistory.push(sample);
     if (state.telemetryHistory.length > MAX_HISTORY) {
       const removed = state.telemetryHistory.shift();
@@ -1711,7 +2021,7 @@ function updateTelemetry(data) {
     cacheTelemetryProjection("dsm", sample);
   }
 
-  elements.topicName.textContent = data.topic || "/localization/fix";
+  if (data.positionUpdate !== false) elements.topicName.textContent = data.topic || "/self_state/globalpose";
   elements.latValue.textContent = formatNumber(data.lat, 6);
   elements.lonValue.textContent = formatNumber(data.lon, 6);
   elements.altValue.textContent = `${formatNumber(data.altitude, 1)} m`;
@@ -1826,7 +2136,7 @@ function queryDsmPointerElevation(x, y) {
   const fingerprint = source.fingerprint;
   const requestId = ++dsmPointerRequestId;
   elements.dsmCursorReadout?.classList.remove("error");
-  if (elements.dsmCursorReadout) elements.dsmCursorReadout.textContent = `x ${x.toFixed(1)}, y ${y.toFixed(1)} · 高程…`;
+  if (elements.dsmCursorReadout) elements.dsmCursorReadout.textContent = "经纬度转换中 · 高程…";
   window.clearTimeout(dsmPointerTimer);
   dsmPointerController?.abort();
   if (!source.loaded) {
@@ -1842,7 +2152,7 @@ function queryDsmPointerElevation(x, y) {
       const elevation = toFiniteNumber(data.elevation);
       const lat = toFiniteNumber(data.lat);
       const lon = toFiniteNumber(data.lon);
-      const coordinate = lat !== null && lon !== null ? `${lat.toFixed(6)}, ${lon.toFixed(6)}` : `x ${x.toFixed(1)}, y ${y.toFixed(1)}`;
+      const coordinate = lat !== null && lon !== null ? `${lat.toFixed(6)}, ${lon.toFixed(6)}` : "经纬度不可用";
       elements.dsmCursorReadout.textContent = elevation === null
         ? `${coordinate} · ${data.error || "无高程"}`
         : `${coordinate} · ${elevation.toFixed(2)} ${data.unit || "m"}`;
@@ -1966,8 +2276,15 @@ function bindRailNavigation() {
       if (target.classList.contains("vehicle-hud")) {
         target.focus({ preventScroll: true });
       } else {
-        target.scrollIntoView({ behavior: "smooth", block: "start" });
+        const sidePanel = target.closest(".side-panel");
+        if (sidePanel) {
+          const panelRect = sidePanel.getBoundingClientRect();
+          const targetRect = target.getBoundingClientRect();
+          const top = sidePanel.scrollTop + targetRect.top - panelRect.top - 8;
+          sidePanel.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+        }
       }
+      window.scrollTo(0, 0);
       target.classList.remove("panel-highlight");
       requestAnimationFrame(() => target.classList.add("panel-highlight"));
       window.setTimeout(() => target.classList.remove("panel-highlight"), 800);

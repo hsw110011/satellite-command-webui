@@ -85,7 +85,7 @@ class GatewayState:
         self.regions = []
         self.publishing: Optional[Dict[str, Any]] = None
         self.latest_topic: Dict[str, Any] = {
-            "name": settings.fix_topic,
+            "name": settings.globalpose_topic,
             "payload": None,
             "receivedAt": None,
         }
@@ -100,7 +100,12 @@ class GatewayState:
         try:
             raw = await run_blocking(self.settings.region_store.read_text, encoding="utf-8")
             parsed = json.loads(raw)
-            self.regions = parsed if isinstance(parsed, list) else []
+            if not isinstance(parsed, list):
+                self.regions = []
+                return
+            self.regions = [self.ros.normalize_region(region) for region in parsed]
+            if self.regions != parsed:
+                await self.save_regions(self.regions)
         except FileNotFoundError:
             self.regions = []
         except Exception:
@@ -142,7 +147,7 @@ class GatewayState:
         if event == "telemetry":
             self.latest_telemetry = data
             self.latest_topic = {
-                "name": data.get("topic", self.settings.fix_topic),
+                "name": data.get("topic", self.settings.globalpose_topic),
                 "payload": data,
                 "receivedAt": data.get("time", now_iso()),
             }
@@ -156,8 +161,11 @@ map_providers = {
     "dom": GeoTiffProvider(),
     "dsm": GeoTiffProvider(),
 }
-map_upload_paths: Dict[str, Optional[Path]] = {"dom": None, "dsm": None}
-map_upload_dir = Path(tempfile.gettempdir()) / "skyforge-map-uploads"
+map_upload_dir = settings.map_store_dir
+persistent_map_paths = {
+    "dom": map_upload_dir / "dom.tif",
+    "dsm": map_upload_dir / "dsm.tif",
+}
 MAX_MAP_UPLOAD_BYTES = max(1, int(os.getenv("SKYFORGE_MAP_MAX_UPLOAD_BYTES", str(4 * 1024**3))))
 MIN_MAP_FREE_BYTES = max(0, int(os.getenv("SKYFORGE_MAP_MIN_FREE_BYTES", str(2 * 1024**3))))
 MAX_UPLOAD_CONCURRENCY = max(1, min(8, int(os.getenv("SKYFORGE_MAP_UPLOAD_CONCURRENCY", "2"))))
@@ -203,11 +211,12 @@ async def simulation_telemetry_loop() -> None:
                 "heading": round(heading, 1),
                 "speed": round(speed, 2),
                 "source": "ros1-simulation",
-                "topic": settings.fix_topic,
+                "topic": settings.globalpose_topic,
+                "positionUpdate": True,
             }
             state.latest_telemetry = telemetry
             state.latest_topic = {
-                "name": settings.fix_topic,
+                "name": settings.globalpose_topic,
                 "payload": telemetry,
                 "receivedAt": telemetry["time"],
             }
@@ -271,20 +280,37 @@ async def region_publish_loop() -> None:
 
 
 def cleanup_stale_uploads() -> None:
-    """Remove files orphaned by a prior process before accepting uploads."""
+    """Remove incomplete uploads while preserving validated map files."""
     map_upload_dir.mkdir(parents=True, exist_ok=True)
-    for path in map_upload_dir.iterdir():
-        if path.is_file():
-            try:
-                path.unlink()
-            except OSError:
-                pass
+    for path in map_upload_dir.glob(".*-upload-*"):
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+
+def restore_persisted_maps() -> None:
+    map_upload_dir.mkdir(parents=True, exist_ok=True)
+    for source, path in persistent_map_paths.items():
+        if not path.is_file():
+            continue
+        provider = GeoTiffProvider()
+        try:
+            provider.load(str(path), source)
+        except Exception as exc:
+            provider.close()
+            print(f"Failed to restore {source.upper()} GeoTIFF: {exc}")
+            continue
+        previous = map_providers[source]
+        map_providers[source] = provider
+        previous.close()
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     hub.bind_loop(asyncio.get_running_loop())
     await run_blocking(cleanup_stale_uploads)
+    await run_blocking(restore_persisted_maps)
     await state.load_regions()
     await run_blocking(state.ros.ensure_started)
     background_tasks.extend(
@@ -306,12 +332,6 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             *(run_blocking(provider.close) for provider in map_providers.values()),
             return_exceptions=True,
         )
-        for upload_path in map_upload_paths.values():
-            if upload_path is not None:
-                try:
-                    upload_path.unlink(missing_ok=True)
-                except Exception:
-                    pass
         # Clean stale temp files from atomic writes
         try:
             data_dir = settings.region_store.parent
@@ -353,6 +373,20 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
 app.add_middleware(RequestSizeLimitMiddleware)
 
 
+class StaticAssetCacheMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        path = request.url.path.lower()
+        if path == "/" or path.endswith((".html", ".js", ".css")):
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+        return response
+
+
+app.add_middleware(StaticAssetCacheMiddleware)
+
+
 @app.get("/api/system/status")
 async def get_system_status() -> Dict[str, Any]:
     return state.system_status()
@@ -391,6 +425,10 @@ async def get_regions() -> Dict[str, Any]:
 
 @app.post("/api/regions")
 async def save_region(region: Dict[str, Any] = Body(...)) -> Any:
+    try:
+        region = state.ros.normalize_region(region)
+    except (TypeError, ValueError) as exc:
+        return JSONResponse(status_code=400, content={"ok": False, "error": str(exc)})
     if not region.get("id"):
         return JSONResponse(status_code=400, content={"ok": False, "error": "Region id is required"})
     try:
@@ -441,6 +479,7 @@ async def start_publishing(body: Dict[str, Any] = Body(...)) -> Any:
     if not isinstance(region, dict):
         return JSONResponse(status_code=400, content={"ok": False, "error": "Region is required"})
     try:
+        region = state.ros.normalize_region(region)
         topic = state.ros.normalize_topic(body.get("topic", settings.default_region_topic))
         rate_hz = max(0.1, min(float(body.get("rateHz", 1)), 20.0))
         if flag not in {"GPS_FLAG", "DR_FLAG", "MATCH_FLAG"}:
@@ -557,8 +596,21 @@ async def ingest_topic(topic_name: str, payload: Dict[str, Any] = Body(...)) -> 
     name = f"/{topic_name.lstrip('/')}"
     state.latest_topic = {"name": name, "payload": payload, "receivedAt": now_iso()}
     await hub.publish("topic", state.latest_topic)
-    if "lat" in payload and "lon" in payload:
-        telemetry = {"time": now_iso(), "topic": name, "source": "http-ingest", **payload}
+    latitude = payload.get("latitude", payload.get("lat"))
+    longitude = payload.get("longitude", payload.get("lon"))
+    if latitude is not None and longitude is not None:
+        telemetry = {
+            "time": now_iso(),
+            "topic": name,
+            "source": "http-ingest",
+            **payload,
+            "lat": latitude,
+            "lon": longitude,
+            "positionUpdate": payload.get(
+                "positionUpdate",
+                name in {settings.globalpose_topic, settings.fix_topic},
+            ),
+        }
         state.latest_telemetry = telemetry
         await hub.publish("telemetry", telemetry)
     return {"ok": True, "latestTopic": state.latest_topic}
@@ -606,7 +658,7 @@ async def upload_geotiff(source: str, request: Request, filename: str = "map.tif
                     return JSONResponse(status_code=507, content={"ok": False, "error": "上传磁盘剩余空间不足"})
 
                 with tempfile.NamedTemporaryFile(
-                    mode="wb", prefix=f"{normalized}-", suffix=suffix,
+                    mode="wb", prefix=f".{normalized}-upload-", suffix=suffix,
                     dir=str(map_upload_dir), delete=False,
                 ) as handle:
                     temporary_path = Path(handle.name)
@@ -631,22 +683,24 @@ async def upload_geotiff(source: str, request: Request, filename: str = "map.tif
 
                 candidate = GeoTiffProvider()
                 try:
-                    metadata = await run_blocking(candidate.load, str(temporary_path), normalized)
+                    await run_blocking(candidate.load, str(temporary_path), normalized)
                 except Exception:
                     candidate.close()
                     raise
+                await run_blocking(candidate.close)
 
-                previous_provider = map_providers[normalized]
-                previous_path = map_upload_paths[normalized]
-                map_providers[normalized] = candidate
-                map_upload_paths[normalized] = temporary_path
+                persistent_path = persistent_map_paths[normalized]
+                await run_blocking(os.replace, temporary_path, persistent_path)
                 temporary_path = None
+                candidate = GeoTiffProvider()
+                try:
+                    metadata = await run_blocking(candidate.load, str(persistent_path), normalized)
+                except Exception:
+                    candidate.close()
+                    raise
+                previous_provider = map_providers[normalized]
+                map_providers[normalized] = candidate
                 await run_blocking(previous_provider.close)
-                if previous_path is not None:
-                    try:
-                        await run_blocking(previous_path.unlink, missing_ok=True)
-                    except OSError:
-                        pass
 
                 return {
                     "ok": True, "source": normalized, "filename": safe_name,
