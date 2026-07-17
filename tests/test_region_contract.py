@@ -1,4 +1,6 @@
+import asyncio
 import json
+import math
 import tempfile
 import unittest
 from pathlib import Path
@@ -6,7 +8,7 @@ from pathlib import Path
 import ros_backend.app as app_module
 from ros_backend.app import EventHub, GatewayState
 from ros_backend.ros_bridge import RosBridge
-from ros_backend.settings import Settings
+from ros_backend.settings import Settings, _topic_list
 
 
 def make_settings(root: Path) -> Settings:
@@ -19,6 +21,7 @@ def make_settings(root: Path) -> Settings:
         port=3000,
         node_name="skyforge_test",
         globalpose_topic="/self_state/globalpose",
+        globalpose_topics=("/self_state/globalpose",),
         fix_topic="/fix",
         odom_topic="/odom",
         default_region_topic="/selected_region",
@@ -32,6 +35,33 @@ def make_settings(root: Path) -> Settings:
 
 
 class RegionContractTests(unittest.TestCase):
+    def test_multiple_globalpose_topics_are_normalized_and_deduplicated(self) -> None:
+        self.assertEqual(
+            _topic_list("/self_state/globalpose", "/self_state/globalpose, vehicle_2/globalpose, /self_state/globalpose"),
+            ("/self_state/globalpose", "/vehicle_2/globalpose"),
+        )
+
+    def test_simulation_circle_stays_inside_the_loaded_tiff_extent(self) -> None:
+        bounds = {
+            "north": 28.66941143282784,
+            "south": 28.66277393464105,
+            "west": 113.05464664180656,
+            "east": 113.06207565322958,
+        }
+        samples = [
+            app_module.simulation_circle_sample(bounds, angle)
+            for angle in (0.0, math.pi / 2.0, math.pi, math.pi * 1.5)
+        ]
+
+        for sample in samples:
+            self.assertGreater(sample["lat"], bounds["south"])
+            self.assertLess(sample["lat"], bounds["north"])
+            self.assertGreater(sample["lon"], bounds["west"])
+            self.assertLess(sample["lon"], bounds["east"])
+            self.assertGreater(sample["speed"], 0.0)
+        self.assertAlmostEqual(samples[0]["heading"], 0.0, places=6)
+        self.assertAlmostEqual(samples[1]["heading"], 270.0, places=6)
+
     def test_legacy_rectangle_is_normalized_to_named_coordinates(self) -> None:
         legacy = {
             "id": "region-1",
@@ -111,6 +141,25 @@ class RegionContractTests(unittest.TestCase):
         self.assertEqual(telemetry["speed"], 13.0)
         self.assertTrue(telemetry["positionUpdate"])
 
+    def test_globalpose_telemetry_preserves_the_subscribed_topic(self) -> None:
+        class ActualGlobalPose:
+            latitude = 28.6664
+            longitude = 113.0571
+
+        emitted = []
+        with tempfile.TemporaryDirectory() as temp_dir:
+            settings = make_settings(Path(temp_dir))
+            settings = Settings(
+                **{
+                    **settings.__dict__,
+                    "globalpose_topics": ("/self_state/globalpose", "/vehicle_2/globalpose"),
+                }
+            )
+            bridge = RosBridge(settings, lambda event, data: emitted.append((event, data)))
+            bridge._on_globalpose(ActualGlobalPose(), "/vehicle_2/globalpose")
+
+        self.assertEqual(emitted[-1][1]["topic"], "/vehicle_2/globalpose")
+
 
 class RegionPersistenceTests(unittest.IsolatedAsyncioTestCase):
     async def test_empty_region_list_is_persisted_after_delete(self) -> None:
@@ -155,6 +204,116 @@ class RegionPersistenceTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(published["publishing"]["region"], created["regions"][0])
             self.assertEqual(deleted["regions"], [])
             self.assertEqual(stored, [])
+
+    async def test_multiple_region_topics_can_publish_concurrently(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            test_state = GatewayState(make_settings(Path(temp_dir)), EventHub())
+            original_state, original_hub = app_module.state, app_module.hub
+            app_module.state, app_module.hub = test_state, EventHub()
+            region_one = {
+                "id": "region-one",
+                "name": "REGION-ONE",
+                "shape": "rectangle",
+                "bbox": {
+                    "topLeft": {"latitude": 31.2, "longitude": 121.4},
+                    "bottomRight": {"latitude": 31.1, "longitude": 121.5},
+                },
+            }
+            region_two = {
+                "id": "region-two",
+                "name": "REGION-TWO",
+                "shape": "rectangle",
+                "bbox": {
+                    "topLeft": {"latitude": 30.2, "longitude": 120.4},
+                    "bottomRight": {"latitude": 30.1, "longitude": 120.5},
+                },
+            }
+            try:
+                first = await app_module.start_publishing(
+                    {"topic": "/region/one", "flag": "GPS_FLAG", "rateHz": 2, "region": region_one}
+                )
+                second = await app_module.start_publishing(
+                    {"topic": "/region/two", "flag": "MATCH_FLAG", "rateHz": 5, "region": region_two}
+                )
+                stopped = await app_module.stop_publishing(
+                    {"publicationId": first["publishing"]["id"]}
+                )
+                stopped_all = await app_module.stop_publishing({})
+            finally:
+                app_module.state, app_module.hub = original_state, original_hub
+
+            self.assertEqual(len(second["publications"]), 2)
+            self.assertEqual(
+                {publication["topic"] for publication in second["publications"]},
+                {"/region/one", "/region/two"},
+            )
+            self.assertEqual(len(stopped["publications"]), 1)
+            self.assertEqual(stopped["publications"][0]["topic"], "/region/two")
+            self.assertEqual(stopped_all["publications"], [])
+
+    async def test_region_publish_rate_defaults_and_clamps_to_50_hz(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            test_state = GatewayState(make_settings(Path(temp_dir)), EventHub())
+            original_state, original_hub = app_module.state, app_module.hub
+            app_module.state, app_module.hub = test_state, EventHub()
+            region = {
+                "id": "rate-region",
+                "name": "RATE-REGION",
+                "shape": "rectangle",
+                "bbox": {
+                    "topLeft": {"latitude": 31.2, "longitude": 121.4},
+                    "bottomRight": {"latitude": 31.1, "longitude": 121.5},
+                },
+            }
+            try:
+                default_rate = await app_module.start_publishing(
+                    {"topic": "/region/rate", "flag": "GPS_FLAG", "region": region}
+                )
+                clamped_rate = await app_module.start_publishing(
+                    {"topic": "/region/rate", "flag": "GPS_FLAG", "rateHz": 500, "region": region}
+                )
+            finally:
+                app_module.state, app_module.hub = original_state, original_hub
+
+            self.assertEqual(default_rate["publishing"]["rateHz"], 50.0)
+            self.assertEqual(clamped_rate["publishing"]["rateHz"], 50.0)
+
+    async def test_region_scheduler_services_all_due_publications(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            test_state = GatewayState(make_settings(Path(temp_dir)), EventHub())
+            original_state, original_hub = app_module.state, app_module.hub
+            app_module.state, app_module.hub = test_state, EventHub()
+            calls = []
+            test_state.ros.publish_region = lambda topic, flag, region: (
+                calls.append((topic, flag, region["id"]))
+                or {"simulated": True, "connections": 1}
+            )
+            region = {
+                "name": "SCHEDULER",
+                "shape": "rectangle",
+                "bbox": {
+                    "topLeft": {"latitude": 31.2, "longitude": 121.4},
+                    "bottomRight": {"latitude": 31.1, "longitude": 121.5},
+                },
+            }
+            try:
+                await app_module.start_publishing(
+                    {"topic": "/region/one", "flag": "GPS_FLAG", "rateHz": 50, "region": {**region, "id": "one"}}
+                )
+                await app_module.start_publishing(
+                    {"topic": "/region/two", "flag": "DR_FLAG", "rateHz": 50, "region": {**region, "id": "two"}}
+                )
+                scheduler = asyncio.create_task(app_module.region_publish_loop())
+                await asyncio.sleep(0.08)
+                scheduler.cancel()
+                await asyncio.gather(scheduler, return_exceptions=True)
+            finally:
+                app_module.state, app_module.hub = original_state, original_hub
+
+            self.assertIn(("/region/one", "GPS_FLAG", "one"), calls)
+            self.assertIn(("/region/two", "DR_FLAG", "two"), calls)
+            self.assertGreaterEqual(sum(call[0] == "/region/one" for call in calls), 2)
+            self.assertGreaterEqual(sum(call[0] == "/region/two" for call in calls), 2)
 
 
 if __name__ == "__main__":

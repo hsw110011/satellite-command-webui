@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import math
 import os
@@ -11,7 +12,7 @@ import urllib.request
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, Optional, Set
+from typing import Any, AsyncIterator, Dict, Optional, Set, Tuple
 
 import uvicorn
 from fastapi import Body, FastAPI, Request
@@ -83,7 +84,7 @@ class GatewayState:
         self.settings = settings
         self.hub = hub
         self.regions = []
-        self.publishing: Optional[Dict[str, Any]] = None
+        self.publications: Dict[str, Dict[str, Any]] = {}
         self.latest_topic: Dict[str, Any] = {
             "name": settings.globalpose_topic,
             "payload": None,
@@ -124,14 +125,29 @@ class GatewayState:
         temporary.replace(target)
 
     def hello(self) -> Dict[str, Any]:
+        publications = self.publication_list()
         return {
             "time": now_iso(),
             "regions": self.regions,
             "latestTopic": self.latest_topic,
             "latestTelemetry": self.latest_telemetry,
-            "publishing": self.publishing,
+            "publishing": publications[0] if publications else None,
+            "publications": publications,
             "localization": self.localization.status(),
             "system": self.system_status(),
+        }
+
+    def publication_list(self) -> list:
+        return [
+            {key: value for key, value in publication.items() if not key.startswith("_")}
+            for publication in self.publications.values()
+        ]
+
+    def publication_payload(self) -> Dict[str, Any]:
+        publications = self.publication_list()
+        return {
+            "publishing": publications[0] if publications else None,
+            "publications": publications,
         }
 
     def system_status(self) -> Dict[str, Any]:
@@ -169,9 +185,60 @@ persistent_map_paths = {
 MAX_MAP_UPLOAD_BYTES = max(1, int(os.getenv("SKYFORGE_MAP_MAX_UPLOAD_BYTES", str(4 * 1024**3))))
 MIN_MAP_FREE_BYTES = max(0, int(os.getenv("SKYFORGE_MAP_MIN_FREE_BYTES", str(2 * 1024**3))))
 MAX_UPLOAD_CONCURRENCY = max(1, min(8, int(os.getenv("SKYFORGE_MAP_UPLOAD_CONCURRENCY", "2"))))
+SIMULATION_RATE_HZ = max(0.2, min(20.0, float(os.getenv("SKYFORGE_SIMULATION_RATE_HZ", "5"))))
+SIMULATION_PERIOD_SECONDS = max(5.0, float(os.getenv("SKYFORGE_SIMULATION_PERIOD_SECONDS", "24")))
+SIMULATION_RADIUS_RATIO = max(0.05, min(0.45, float(os.getenv("SKYFORGE_SIMULATION_RADIUS_RATIO", "0.32"))))
+DEFAULT_REGION_PUBLISH_RATE_HZ = 50.0
+MAX_REGION_PUBLISH_RATE_HZ = 50.0
 map_upload_locks = {"dom": asyncio.Lock(), "dsm": asyncio.Lock()}
 map_upload_semaphore = asyncio.Semaphore(MAX_UPLOAD_CONCURRENCY)
 background_tasks = []
+
+
+def simulation_map_extent() -> Tuple[Dict[str, float], str]:
+    for source in ("dom", "dsm"):
+        metadata = map_providers[source].metadata()
+        bounds = metadata.get("bounds") if metadata.get("loaded") else None
+        if not isinstance(bounds, dict):
+            continue
+        try:
+            extent = {key: float(bounds[key]) for key in ("north", "south", "west", "east")}
+        except (KeyError, TypeError, ValueError):
+            continue
+        if extent["north"] > extent["south"] and extent["east"] > extent["west"]:
+            return extent, source
+    return {
+        "north": 39.9075,
+        "south": 39.9009,
+        "west": 116.4031,
+        "east": 116.4117,
+    }, "fallback"
+
+
+def simulation_circle_sample(bounds: Dict[str, float], angle: float, radius_scale: float = 1.0) -> Dict[str, float]:
+    center_lat = (bounds["north"] + bounds["south"]) / 2.0
+    center_lon = (bounds["west"] + bounds["east"]) / 2.0
+    latitude_span_m = (bounds["north"] - bounds["south"]) * 111_320.0
+    longitude_scale = max(0.01, math.cos(math.radians(center_lat)))
+    longitude_span_m = (bounds["east"] - bounds["west"]) * 111_320.0 * longitude_scale
+    radius_m = max(
+        1.0,
+        min(latitude_span_m, longitude_span_m)
+        * SIMULATION_RADIUS_RATIO
+        * max(0.35, min(1.0, radius_scale)),
+    )
+    latitude_radius = radius_m / 111_320.0
+    longitude_radius = radius_m / (111_320.0 * longitude_scale)
+    angular_speed = 2.0 * math.pi / SIMULATION_PERIOD_SECONDS
+    north_speed = radius_m * angular_speed * math.cos(angle)
+    east_speed = -radius_m * angular_speed * math.sin(angle)
+    return {
+        "lat": center_lat + latitude_radius * math.sin(angle),
+        "lon": center_lon + longitude_radius * math.cos(angle),
+        "heading": (math.degrees(math.atan2(east_speed, north_speed)) + 360.0) % 360.0,
+        "speed": math.hypot(north_speed, east_speed),
+        "radiusMeters": radius_m,
+    }
 
 
 async def run_blocking(function: Any, *args: Any, **kwargs: Any) -> Any:
@@ -192,91 +259,115 @@ async def system_status_loop() -> None:
 
 
 async def simulation_telemetry_loop() -> None:
-    center_lat = 39.904214
-    center_lon = 116.407413
-    t = 0.0
+    angle = 0.0
+    interval = 1.0 / SIMULATION_RATE_HZ
+    angular_step = 2.0 * math.pi * interval / SIMULATION_PERIOD_SECONDS
     while True:
         if settings.simulation:
-            t += 0.04
-            # Bounded orbital motion instead of unbounded random walk
-            lat = center_lat + 0.003 * math.sin(t * 0.7) + 0.001 * math.sin(t * 2.3)
-            lon = center_lon + 0.004 * math.cos(t * 0.5) + 0.0015 * math.cos(t * 1.8)
-            heading = (math.degrees(math.atan2(math.cos(t * 0.7) * 0.7, -math.sin(t * 0.5) * 0.5)) + 360) % 360
-            speed = 2.4 + 1.2 * abs(math.sin(t * 0.9))
-            telemetry = {
-                "time": now_iso(),
-                "lat": lat,
-                "lon": lon,
-                "altitude": 42.6 + 3.0 * math.sin(t * 0.3),
-                "heading": round(heading, 1),
-                "speed": round(speed, 2),
-                "source": "ros1-simulation",
-                "topic": settings.globalpose_topic,
-                "positionUpdate": True,
-            }
-            state.latest_telemetry = telemetry
-            state.latest_topic = {
-                "name": settings.globalpose_topic,
-                "payload": telemetry,
-                "receivedAt": telemetry["time"],
-            }
-            await hub.publish("telemetry", telemetry)
-        await asyncio.sleep(1.0)
+            bounds, map_source = simulation_map_extent()
+            topics = settings.globalpose_topics or (settings.globalpose_topic,)
+            for index, topic in enumerate(topics):
+                phase = angle + index * (2.0 * math.pi / max(1, len(topics)))
+                sample = simulation_circle_sample(bounds, phase, 1.0 - index * 0.12)
+                telemetry = {
+                    "time": now_iso(),
+                    "lat": sample["lat"],
+                    "lon": sample["lon"],
+                    "altitude": 42.6 + 3.0 * math.sin(phase),
+                    "heading": round(sample["heading"], 1),
+                    "speed": round(sample["speed"], 2),
+                    "source": f"tiff-circle-simulation:{map_source}:{index + 1}",
+                    "topic": topic,
+                    "positionUpdate": True,
+                }
+                state.latest_telemetry = telemetry
+                state.latest_topic = {
+                    "name": topic,
+                    "payload": telemetry,
+                    "receivedAt": telemetry["time"],
+                }
+                await hub.publish("telemetry", telemetry)
+            angle = (angle + angular_step) % (2.0 * math.pi)
+        await asyncio.sleep(interval if settings.simulation else 1.0)
 
 
 async def region_publish_loop() -> None:
     while True:
+        now = asyncio.get_running_loop().time()
         async with state.publish_lock:
-            publishing = dict(state.publishing) if state.publishing else None
-        if not publishing or not publishing.get("active"):
-            await asyncio.sleep(0.2)
-            continue
-
-        generation = int(publishing["generation"])
-        interval = 1.0 / max(0.1, min(float(publishing.get("rateHz", 1)), 20.0))
-        try:
-            result = await run_blocking(
-                state.ros.publish_region,
-                publishing["topic"],
-                publishing["flag"],
-                publishing["region"],
-            )
-            connected = bool(result.get("simulated") or result.get("connections", 0) > 0)
-            delivery_state = "RUNNING" if connected else "WAITING_SUBSCRIBER"
-            async with state.publish_lock:
-                if not state.publishing or state.publishing.get("generation") != generation:
+            due_publications = []
+            next_due_delay = 0.05
+            for publication in state.publications.values():
+                if not publication.get("active"):
                     continue
-                state_changed = state.publishing.get("deliveryState") != delivery_state
-                state.publishing["deliveryState"] = delivery_state
-                state.publishing["lastAttemptAt"] = now_iso()
-                if connected:
-                    state.publishing["lastPublishedAt"] = state.publishing["lastAttemptAt"]
-                state.publishing["lastError"] = None
-                publish_state = dict(state.publishing)
-            if state_changed:
-                await hub.publish("publish-state", publish_state)
-            if connected:
-                await hub.publish(
-                    "publish",
-                    {
-                        "time": publish_state["lastPublishedAt"],
-                        "topic": publishing["topic"],
-                        "flag": publishing["flag"],
-                        "region": publishing["region"],
-                        "data": {"flag": publishing["flag"], "region": publishing["region"]},
-                        "transport": result,
-                    },
+                next_publish_at = float(publication.get("_nextPublishAt", 0.0))
+                if next_publish_at > now:
+                    next_due_delay = min(next_due_delay, next_publish_at - now)
+                    continue
+                interval = 1.0 / max(
+                    0.1,
+                    min(float(publication.get("rateHz", DEFAULT_REGION_PUBLISH_RATE_HZ)), MAX_REGION_PUBLISH_RATE_HZ),
                 )
-        except Exception as exc:
-            async with state.publish_lock:
-                if not state.publishing or state.publishing.get("generation") != generation:
-                    continue
-                state.publishing["active"] = False
-                state.publishing["deliveryState"] = "ERROR"
-                state.publishing["lastError"] = str(exc)
-                publish_state = dict(state.publishing)
-            await hub.publish("publish-state", publish_state)
-        await asyncio.sleep(interval)
+                publication["_nextPublishAt"] = now + interval
+                due_publications.append(dict(publication))
+        if not due_publications:
+            await asyncio.sleep(max(0.001, next_due_delay))
+            continue
+        await asyncio.gather(
+            *(_publish_region_once(publication) for publication in due_publications),
+            return_exceptions=True,
+        )
+
+
+async def _publish_region_once(publication: Dict[str, Any]) -> None:
+    publication_id = publication["id"]
+    generation = int(publication["generation"])
+    try:
+        result = await run_blocking(
+            state.ros.publish_region,
+            publication["topic"],
+            publication["flag"],
+            publication["region"],
+        )
+        connected = bool(result.get("simulated") or result.get("connections", 0) > 0)
+        delivery_state = "RUNNING" if connected else "WAITING_SUBSCRIBER"
+        async with state.publish_lock:
+            current = state.publications.get(publication_id)
+            if not current or current.get("generation") != generation:
+                return
+            state_changed = current.get("deliveryState") != delivery_state
+            current["deliveryState"] = delivery_state
+            current["lastAttemptAt"] = now_iso()
+            if connected:
+                current["lastPublishedAt"] = current["lastAttemptAt"]
+            current["lastError"] = None
+            publish_state = {key: value for key, value in current.items() if not key.startswith("_")}
+            publish_payload = state.publication_payload()
+        if state_changed:
+            await hub.publish("publish-state", publish_payload)
+        if connected:
+            await hub.publish(
+                "publish",
+                {
+                    "time": publish_state["lastPublishedAt"],
+                    "publicationId": publication_id,
+                    "topic": publication["topic"],
+                    "flag": publication["flag"],
+                    "region": publication["region"],
+                    "data": {"flag": publication["flag"], "region": publication["region"]},
+                    "transport": result,
+                },
+            )
+    except Exception as exc:
+        async with state.publish_lock:
+            current = state.publications.get(publication_id)
+            if not current or current.get("generation") != generation:
+                return
+            current["active"] = False
+            current["deliveryState"] = "ERROR"
+            current["lastError"] = str(exc)
+            publish_payload = state.publication_payload()
+        await hub.publish("publish-state", publish_payload)
 
 
 def cleanup_stale_uploads() -> None:
@@ -464,10 +555,16 @@ async def delete_region(region_id: str) -> Any:
             return JSONResponse(status_code=500, content={"ok": False, "error": f"Region persistence failed: {exc}"})
         state.regions = candidate
     async with state.publish_lock:
-        if state.publishing and state.publishing.get("region", {}).get("id") == region_id:
-            state.publish_generation += 1
-            state.publishing = None
-            await hub.publish("publish-state", None)
+        stopped_ids = [
+            publication_id
+            for publication_id, publication in state.publications.items()
+            if publication.get("region", {}).get("id") == region_id
+        ]
+        for publication_id in stopped_ids:
+            state.publications.pop(publication_id, None)
+        publish_payload = state.publication_payload()
+    if stopped_ids:
+        await hub.publish("publish-state", publish_payload)
     await hub.publish("regions", {"regions": state.regions})
     return {"ok": True, "deleted": region, "regions": state.regions}
 
@@ -481,7 +578,10 @@ async def start_publishing(body: Dict[str, Any] = Body(...)) -> Any:
     try:
         region = state.ros.normalize_region(region)
         topic = state.ros.normalize_topic(body.get("topic", settings.default_region_topic))
-        rate_hz = max(0.1, min(float(body.get("rateHz", 1)), 20.0))
+        rate_hz = max(
+            0.1,
+            min(float(body.get("rateHz", DEFAULT_REGION_PUBLISH_RATE_HZ)), MAX_REGION_PUBLISH_RATE_HZ),
+        )
         if flag not in {"GPS_FLAG", "DR_FLAG", "MATCH_FLAG"}:
             raise ValueError(f"Unsupported flag: {flag}")
         await run_blocking(state.ros.validate_region, region)
@@ -496,7 +596,10 @@ async def start_publishing(body: Dict[str, Any] = Body(...)) -> Any:
     async with state.publish_lock:
         state.publish_generation += 1
         generation = state.publish_generation
-        state.publishing = {
+        publication_key = f"{region['id']}\0{topic}\0{flag}".encode("utf-8")
+        publication_id = hashlib.sha256(publication_key).hexdigest()[:16]
+        state.publications[publication_id] = {
+            "id": publication_id,
             "active": True,
             "deliveryState": "PENDING",
             "generation": generation,
@@ -508,18 +611,25 @@ async def start_publishing(body: Dict[str, Any] = Body(...)) -> Any:
             "lastAttemptAt": None,
             "lastPublishedAt": None,
             "lastError": None,
+            "_nextPublishAt": 0.0,
         }
-    await hub.publish("publish-state", state.publishing)
-    return {"ok": True, "publishing": state.publishing}
+        publish_payload = state.publication_payload()
+    await hub.publish("publish-state", publish_payload)
+    return {"ok": True, **publish_payload}
 
 
 @app.post("/api/publish/stop")
-async def stop_publishing() -> Dict[str, Any]:
+async def stop_publishing(body: Optional[Dict[str, Any]] = Body(default=None)) -> Dict[str, Any]:
+    publication_id = str((body or {}).get("publicationId", "")).strip()
     async with state.publish_lock:
-        state.publish_generation += 1
-        state.publishing = None
-    await hub.publish("publish-state", None)
-    return {"ok": True, "publishing": None}
+        if publication_id:
+            stopped = state.publications.pop(publication_id, None)
+        else:
+            stopped = list(state.publications.values())
+            state.publications.clear()
+        publish_payload = state.publication_payload()
+    await hub.publish("publish-state", publish_payload)
+    return {"ok": True, "stopped": stopped, **publish_payload}
 
 
 @app.post("/api/localization/start")
@@ -608,7 +718,7 @@ async def ingest_topic(topic_name: str, payload: Dict[str, Any] = Body(...)) -> 
             "lon": longitude,
             "positionUpdate": payload.get(
                 "positionUpdate",
-                name in {settings.globalpose_topic, settings.fix_topic},
+                name in {*settings.globalpose_topics, settings.fix_topic},
             ),
         }
         state.latest_telemetry = telemetry

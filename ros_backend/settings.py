@@ -14,6 +14,20 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _topic_list(primary: str, configured: str) -> Tuple[str, ...]:
+    raw_topics = configured.split(",") if configured.strip() else [primary]
+    topics = []
+    for raw_topic in raw_topics:
+        topic = raw_topic.strip()
+        if not topic:
+            continue
+        if not topic.startswith("/"):
+            topic = f"/{topic}"
+        if topic not in topics:
+            topics.append(topic)
+    return tuple(topics or [primary])
+
+
 @dataclass(frozen=True)
 class Settings:
     project_root: Path
@@ -24,6 +38,7 @@ class Settings:
     port: int
     node_name: str
     globalpose_topic: str
+    globalpose_topics: Tuple[str, ...]
     fix_topic: str
     odom_topic: str
     default_region_topic: str
@@ -37,6 +52,11 @@ class Settings:
     @classmethod
     def from_env(cls) -> "Settings":
         project_root = Path(__file__).resolve().parents[1]
+        primary_globalpose = os.getenv("SKYFORGE_GLOBALPOSE_TOPIC", "/self_state/globalpose")
+        globalpose_topics = _topic_list(
+            primary_globalpose,
+            os.getenv("SKYFORGE_GLOBALPOSE_TOPICS", ""),
+        )
         return cls(
             project_root=project_root,
             public_dir=project_root / "public",
@@ -47,7 +67,8 @@ class Settings:
             host=os.getenv("SKYFORGE_HOST", "127.0.0.1"),
             port=int(os.getenv("SKYFORGE_PORT", os.getenv("PORT", "3000"))),
             node_name=os.getenv("SKYFORGE_ROS_NODE", "skyforge_gateway"),
-            globalpose_topic=os.getenv("SKYFORGE_GLOBALPOSE_TOPIC", "/self_state/globalpose"),
+            globalpose_topic=globalpose_topics[0],
+            globalpose_topics=globalpose_topics,
             fix_topic=os.getenv("SKYFORGE_FIX_TOPIC", "/fix"),
             odom_topic=os.getenv("SKYFORGE_ODOM_TOPIC", "/odom"),
             default_region_topic=os.getenv("SKYFORGE_REGION_TOPIC", "/selected_region"),
@@ -67,6 +88,7 @@ class Settings:
         return {
             "nodeName": self.node_name,
             "globalposeTopic": self.globalpose_topic,
+            "globalposeTopics": list(self.globalpose_topics),
             "fixTopic": self.fix_topic,
             "odomTopic": self.odom_topic,
             "regionTopic": self.default_region_topic,

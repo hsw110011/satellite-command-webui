@@ -12,7 +12,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css?v=20260717.9" />
+    <link rel="stylesheet" href="./styles.css?v=20260717.19" />
   </head>
   <body>
     <div class="app-shell">
@@ -179,6 +179,7 @@
                   <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
                 </div>
                 <div class="compass" aria-hidden="true"><span>N</span></div>
+                <div id="domTrajectoryLegend" class="trajectory-legend" hidden></div>
                 <div class="scale-bar" aria-hidden="true"><i></i><span>500 m</span></div>
                 <div id="drawHint" class="draw-hint" hidden>左键添加顶点 · 双击闭合 · 右键撤销</div>
                 <div id="cursorReadout" class="cursor-readout">--</div>
@@ -233,6 +234,7 @@
                   <i class="corner tl"></i><i class="corner tr"></i><i class="corner bl"></i><i class="corner br"></i>
                 </div>
                 <div class="compass" aria-hidden="true"><span>N</span></div>
+                <div id="dsmTrajectoryLegend" class="trajectory-legend" hidden></div>
                 <div class="scale-bar" aria-hidden="true"><i></i><span>500 m</span></div>
                 <div id="dsmDrawHint" class="draw-hint" hidden>按住左键拖动 · 松开后确认区域</div>
                 <div id="dsmCursorReadout" class="cursor-readout">高程 --</div>
@@ -306,8 +308,14 @@
             </div>
             <p class="field-help">统一消息结构：<code>{ flag, region }</code>。切换标识位不会修改话题名称。</p>
             <div class="control-actions">
-              <button id="publishButton" class="primary-button" title="持续发布选中区域">发布</button>
-              <button id="stopButton" class="ghost-button" title="停止发布">停止</button>
+              <button id="publishButton" class="primary-button" title="添加一条持续区域发布任务">添加发布</button>
+              <button id="stopButton" class="ghost-button" title="停止全部区域发布任务">全部停止</button>
+            </div>
+            <div class="publication-section">
+              <span>并发发布任务</span>
+              <div id="publicationList" class="publication-list">
+                <p class="publication-empty">暂无发布任务</p>
+              </div>
             </div>
             <div class="region-readout">
               <span>当前区域</span>
@@ -385,6 +393,6 @@
       </form>
     </dialog>
 
-    <script src="./app.js?v=20260717.9" type="module"></script>
+    <script src="./app.js?v=20260717.19" type="module"></script>
   </body>
 </html>

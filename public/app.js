@@ -18,11 +18,13 @@ const elements = {
   mapViewport: $("#mapViewport"), mapContent: $("#mapContent"), vectorLayer: $("#vectorLayer"),
   dsmViewport: $("#dsmViewport"), dsmContent: $("#dsmContent"), dsmVectorLayer: $("#dsmVectorLayer"),
   drawHint: $("#drawHint"), dsmDrawHint: $("#dsmDrawHint"),
+  domTrajectoryLegend: $("#domTrajectoryLegend"), dsmTrajectoryLegend: $("#dsmTrajectoryLegend"),
   cursorReadout: $("#cursorReadout"), dsmCursorReadout: $("#dsmCursorReadout"),
   domMapMeta: $("#domMapMeta"), dsmMapMeta: $("#dsmMapMeta"), dsmRangeValue: $("#dsmRangeValue"),
   groundElevationValue: $("#groundElevationValue"), flagSelect: $("#flagSelect"),
   regionSelect: $("#regionSelect"), deleteRegionButton: $("#deleteRegionButton"), topicInput: $("#topicInput"),
   publishButton: $("#publishButton"), stopButton: $("#stopButton"), publishStatus: $("#publishStatus"),
+  publicationList: $("#publicationList"),
   startLocButton: $("#startLocButton"), locProgramState: $("#locProgramState"),
   rosMasterValue: $("#rosMasterValue"), rosNodeValue: $("#rosNodeValue"),
   messageTypeValue: $("#messageTypeValue"), launchConfigValue: $("#launchConfigValue"),
@@ -39,10 +41,24 @@ const elements = {
 
 const TILE_SIZE = 256;
 const MAX_HISTORY = 240;
+const MAX_TRAJECTORY_TOPICS = 8;
 const MAX_VISIBLE_TILES = 144;
 const DEFAULT_CACHED_TILE_NODES = 192;
 const TILE_REFRESH_DELAY_MS = 150;
 const UI_PREFERENCES_KEY = "skyforge-ui-preferences-v1";
+const REGION_PALETTE = [
+  { stroke: "#53d8fb", fill: "rgba(83, 216, 251, 0.12)", selectedFill: "rgba(83, 216, 251, 0.22)" },
+  { stroke: "#ffc857", fill: "rgba(255, 200, 87, 0.12)", selectedFill: "rgba(255, 200, 87, 0.22)" },
+  { stroke: "#70e000", fill: "rgba(112, 224, 0, 0.11)", selectedFill: "rgba(112, 224, 0, 0.21)" },
+  { stroke: "#ff6b9e", fill: "rgba(255, 107, 158, 0.11)", selectedFill: "rgba(255, 107, 158, 0.21)" },
+  { stroke: "#ff8c42", fill: "rgba(255, 140, 66, 0.11)", selectedFill: "rgba(255, 140, 66, 0.21)" },
+  { stroke: "#45f0c1", fill: "rgba(69, 240, 193, 0.11)", selectedFill: "rgba(69, 240, 193, 0.21)" },
+  { stroke: "#b892ff", fill: "rgba(184, 146, 255, 0.11)", selectedFill: "rgba(184, 146, 255, 0.21)" },
+  { stroke: "#f25f5c", fill: "rgba(242, 95, 92, 0.11)", selectedFill: "rgba(242, 95, 92, 0.21)" }
+];
+const SECONDARY_TRAJECTORY_COLORS = [
+  "#ff3b30", "#00d084", "#0066ff", "#ff9500", "#af52de", "#00bcd4", "#ff2d92"
+];
 const MIN_MAP_SCALE = 0.0001;
 const MAX_MAP_SCALE = 32;
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -66,12 +82,12 @@ const state = {
   dsmDrag: null,
   regions: [], selectedRegionId: "", drawKind: null, drawMode: null, selectionEl: null,
   polygonPoints: [], polygonCursor: null, latestTelemetry: null, telemetryHistory: [],
-  publishing: false, publishingStatus: null, localizationRunning: false,
+  publishing: false, publications: [], localizationRunning: false,
   localizationStatus: null, system: null, uploading: { dom: false, dsm: false },
   focusedMap: null, pendingRegion: null
 };
 
-const trajectoryNodes = { dom: null, dsm: null };
+const trajectoryNodes = { dom: new Map(), dsm: new Map() };
 const trajectoryProjection = {
   dom: { fingerprint: null, pixels: new Map(), pending: new Set(), timer: 0, controller: null, requestId: 0 },
   dsm: { fingerprint: null, pixels: new Map(), pending: new Set(), timer: 0, controller: null, requestId: 0 }
@@ -193,7 +209,7 @@ function bindEvents() {
   on(elements.agentType, "change", saveUiPreferences);
   on(elements.deleteRegionButton, "click", deleteSelectedRegion);
   on(elements.publishButton, "click", startPublishing);
-  on(elements.stopButton, "click", stopPublishing);
+  on(elements.stopButton, "click", () => stopPublishing());
   on(elements.startLocButton, "click", toggleLocalization);
   on(elements.runAgentButton, "click", runAgent);
   on(elements.confirmRegionButton, "click", validatePendingRegionName);
@@ -945,6 +961,7 @@ function applyTransform(kind = "dom") {
   const { content, view } = mapParts(kind);
   if (!content) return;
   constrainViewToViewport(kind);
+  content.style.setProperty("--map-inverse-scale", String(1 / Math.max(view.scale, MIN_MAP_SCALE)));
   content.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
   content.classList.toggle("native-resolution", view.scale >= 0.999);
   updateZoomIndicator(kind);
@@ -1093,6 +1110,7 @@ function onPointerDown(event) {
     state.selectionEl = document.createElement("div");
     state.selectionEl.className = "selection-box";
     state.selectionEl.dataset.name = "NEW REGION";
+    applyRegionCssVariables(state.selectionEl, nextRegionVisual());
     elements.mapContent?.append(state.selectionEl);
     updateSelectionEl("dom");
   } else {
@@ -1128,6 +1146,7 @@ function onDsmPointerDown(event) {
     state.selectionEl = document.createElement("div");
     state.selectionEl.className = "selection-box";
     state.selectionEl.dataset.name = "NEW REGION";
+    applyRegionCssVariables(state.selectionEl, nextRegionVisual());
     elements.dsmContent?.append(state.selectionEl);
     updateSelectionEl("dsm");
   } else {
@@ -1320,6 +1339,7 @@ function explicitGeographicCoordinate(point) {
 
 function buildRegionBase(shape, kind) {
   const source = mapParts(kind).source;
+  const visual = nextRegionVisual();
   return {
     id: `region-${Date.now()}`,
     name: `AREA-${String(state.regions.length + 1).padStart(3, "0")}`,
@@ -1327,8 +1347,29 @@ function buildRegionBase(shape, kind) {
     sourceKind: kind,
     sourceType: source.type,
     mapFingerprint: source.fingerprint,
+    color: visual.stroke,
     createdAt: new Date().toISOString()
   };
+}
+
+function regionVisual(region, index = 0) {
+  const explicit = String(region?.color || "").toLowerCase();
+  return REGION_PALETTE.find((item) => item.stroke.toLowerCase() === explicit)
+    || REGION_PALETTE[index % REGION_PALETTE.length];
+}
+
+function nextRegionVisual() {
+  const used = new Set(
+    state.regions.map((region, index) => regionVisual(region, index).stroke.toLowerCase())
+  );
+  return REGION_PALETTE.find((item) => !used.has(item.stroke.toLowerCase()))
+    || REGION_PALETTE[state.regions.length % REGION_PALETTE.length];
+}
+
+function applyRegionCssVariables(node, visual) {
+  node.style.setProperty("--region-stroke", visual.stroke);
+  node.style.setProperty("--region-fill", visual.fill);
+  node.style.setProperty("--region-selected-fill", visual.selectedFill);
 }
 
 async function requestRegionConfirmation(region) {
@@ -1401,22 +1442,10 @@ function renderSavedRegions() {
 }
 
 function renderSavedRegionsForMap(kind) {
-  const { content, source } = mapParts(kind);
+  const { content } = mapParts(kind);
   if (!content) return;
   content.querySelectorAll(".saved-region").forEach((node) => node.remove());
   renderVectorLayer(kind);
-  for (const region of state.regions) {
-    if (!region.pixelBox || !regionMatchesSource(region, source)) continue;
-    const el = document.createElement("div");
-    el.className = "saved-region";
-    if (region.id === state.selectedRegionId) el.classList.add("selected");
-    el.dataset.name = region.name;
-    el.style.left = `${region.pixelBox.x}px`;
-    el.style.top = `${region.pixelBox.y}px`;
-    el.style.width = `${region.pixelBox.width}px`;
-    el.style.height = `${region.pixelBox.height}px`;
-    content.append(el);
-  }
 }
 
 function renderVectorLayer(kind = "dom") {
@@ -1424,13 +1453,29 @@ function renderVectorLayer(kind = "dom") {
   const layer = ensureMapVectorLayer(kind);
   if (!layer) return;
   layer.innerHTML = "";
-  for (const region of state.regions) {
-    if (!region.pixelPoints || !regionMatchesSource(region, source)) continue;
-    const polygon = document.createElementNS(SVG_NS, "polygon");
-    polygon.setAttribute("points", region.pixelPoints.map((point) => `${point.x},${point.y}`).join(" "));
-    polygon.setAttribute("class", region.id === state.selectedRegionId ? "region-poly region-poly-selected" : "region-poly");
-    layer.append(polygon);
-    const anchor = region.pixelPoints[0];
+  for (const [index, region] of state.regions.entries()) {
+    if (!regionMatchesSource(region, source)) continue;
+    const visual = regionVisual(region, index);
+    const selected = region.id === state.selectedRegionId;
+    let shape = null;
+    let anchor = null;
+    if (Array.isArray(region.pixelPoints) && region.pixelPoints.length >= 3) {
+      shape = document.createElementNS(SVG_NS, "polygon");
+      shape.setAttribute("points", region.pixelPoints.map((point) => `${point.x},${point.y}`).join(" "));
+      anchor = region.pixelPoints[0];
+    } else if (region.pixelBox) {
+      shape = document.createElementNS(SVG_NS, "rect");
+      shape.setAttribute("x", region.pixelBox.x);
+      shape.setAttribute("y", region.pixelBox.y);
+      shape.setAttribute("width", region.pixelBox.width);
+      shape.setAttribute("height", region.pixelBox.height);
+      anchor = { x: region.pixelBox.x, y: region.pixelBox.y };
+    }
+    if (!shape || !anchor) continue;
+    shape.setAttribute("class", selected ? "region-shape region-shape-selected" : "region-shape");
+    shape.setAttribute("stroke", visual.stroke);
+    shape.setAttribute("fill", selected ? visual.selectedFill : visual.fill);
+    layer.append(shape);
     const labelWidth = Math.max(62, region.name.length * 8 + 12);
     const bg = document.createElementNS(SVG_NS, "rect");
     bg.setAttribute("x", anchor.x + 7);
@@ -1438,11 +1483,13 @@ function renderVectorLayer(kind = "dom") {
     bg.setAttribute("width", labelWidth);
     bg.setAttribute("height", 20);
     bg.setAttribute("class", "region-label-bg");
+    bg.setAttribute("fill", visual.stroke);
     layer.append(bg);
     const label = document.createElementNS(SVG_NS, "text");
     label.setAttribute("x", anchor.x + 13);
     label.setAttribute("y", anchor.y + 21);
     label.setAttribute("class", "region-label");
+    label.setAttribute("fill", "#071018");
     label.textContent = region.name;
     layer.append(label);
   }
@@ -1451,8 +1498,10 @@ function renderVectorLayer(kind = "dom") {
     const preview = [...state.polygonPoints];
     if (state.polygonCursor) preview.push(state.polygonCursor);
     const polygon = document.createElementNS(SVG_NS, "polyline");
+    const visual = nextRegionVisual();
     polygon.setAttribute("points", preview.map((point) => `${point.x},${point.y}`).join(" "));
     polygon.setAttribute("class", "draft-poly");
+    polygon.setAttribute("stroke", visual.stroke);
     layer.append(polygon);
     for (const point of state.polygonPoints) {
       const vertex = document.createElementNS(SVG_NS, "circle");
@@ -1468,60 +1517,115 @@ function renderVectorLayer(kind = "dom") {
 }
 
 function renderTrajectoryOnMap(kind, layer) {
-  if (!layer) return;
-  let nodes = trajectoryNodes[kind];
+  updateTrajectoryElements(kind, layer);
+}
+
+function primaryTrajectoryTopic() {
+  return state.system?.settings?.globalposeTopic || "/self_state/globalpose";
+}
+
+function trajectoryColor(topic) {
+  if (topic === primaryTrajectoryTopic()) return "var(--trajectory-color)";
+  const configuredTopics = state.system?.settings?.globalposeTopics || [];
+  const configuredIndex = configuredTopics.indexOf(topic);
+  if (configuredIndex > 0) {
+    return SECONDARY_TRAJECTORY_COLORS[(configuredIndex - 1) % SECONDARY_TRAJECTORY_COLORS.length];
+  }
+  let hash = 0;
+  for (const character of topic) hash = ((hash << 5) - hash + character.charCodeAt(0)) | 0;
+  return SECONDARY_TRAJECTORY_COLORS[Math.abs(hash) % SECONDARY_TRAJECTORY_COLORS.length];
+}
+
+function ensureTrajectoryTopicNodes(kind, layer, topic) {
+  const nodeMap = trajectoryNodes[kind];
+  let nodes = nodeMap.get(topic);
   if (!nodes) {
+    const color = trajectoryColor(topic);
     nodes = {
+      group: document.createElementNS(SVG_NS, "g"),
       trail: document.createElementNS(SVG_NS, "polyline"),
       position: document.createElementNS(SVG_NS, "circle"),
       ring: document.createElementNS(SVG_NS, "circle"),
       start: document.createElementNS(SVG_NS, "circle")
     };
+    nodes.group.dataset.topic = topic;
     nodes.trail.setAttribute("class", "trajectory-trail");
+    nodes.trail.style.fill = "none";
+    nodes.trail.style.stroke = color;
+    nodes.trail.style.strokeWidth = "var(--trajectory-width)";
+    nodes.trail.style.opacity = "1";
     nodes.position.setAttribute("class", "trajectory-pos");
+    nodes.position.style.fill = color;
     nodes.ring.setAttribute("class", "trajectory-ring");
+    nodes.ring.style.stroke = color;
     nodes.start.setAttribute("class", "trajectory-start");
-    trajectoryNodes[kind] = nodes;
+    nodes.start.style.fill = color;
+    nodes.group.append(nodes.trail, nodes.position, nodes.ring, nodes.start);
+    nodeMap.set(topic, nodes);
   }
-  layer.append(nodes.trail, nodes.position, nodes.ring, nodes.start);
-  updateTrajectoryElements(kind);
+  layer.append(nodes.group);
+  return nodes;
 }
 
-function updateTrajectoryElements(kind) {
-  const nodes = trajectoryNodes[kind];
-  if (!nodes) return;
+function renderTrajectoryLegend(kind, topics) {
+  const legend = kind === "dsm" ? elements.dsmTrajectoryLegend : elements.domTrajectoryLegend;
+  if (!legend) return;
+  legend.replaceChildren();
+  for (const topic of topics) {
+    const item = document.createElement("span");
+    const swatch = document.createElement("i");
+    const label = document.createElement("b");
+    swatch.style.background = trajectoryColor(topic);
+    label.textContent = topic;
+    item.append(swatch, label);
+    legend.append(item);
+  }
+  legend.hidden = topics.length === 0;
+}
+
+function updateTrajectoryElements(kind, layerOverride = null) {
   const source = kind === "dsm" ? state.dsmSource : state.source;
   const view = kind === "dsm" ? state.dsmView : state.view;
   const cache = trajectoryProjection[kind];
-  const pixelPoints = cache.fingerprint === source.fingerprint
-    ? state.telemetryHistory.map((item) => cache.pixels.get(item.id)).filter(Boolean)
-    : [];
-  if (!pixelPoints.length) {
-    nodes.trail.setAttribute("points", "");
-    nodes.position.setAttribute("r", "0");
-    nodes.ring.setAttribute("r", "0");
-    nodes.start.setAttribute("r", "0");
-    return;
+  const layer = layerOverride || (kind === "dsm" ? elements.dsmVectorLayer : elements.vectorLayer);
+  if (!layer) return;
+  const grouped = new Map();
+  if (cache.fingerprint === source.fingerprint) {
+    for (const sample of state.telemetryHistory) {
+      const point = cache.pixels.get(sample.id);
+      if (!point) continue;
+      const topic = sample.topic || primaryTrajectoryTopic();
+      if (!grouped.has(topic)) grouped.set(topic, []);
+      grouped.get(topic).push(point);
+    }
   }
-
-  nodes.trail.setAttribute("points", pixelPoints.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" "));
-  const last = pixelPoints[pixelPoints.length - 1];
+  const activeTopics = new Set(grouped.keys());
   const scale = Math.max(view.scale, 0.02);
-  nodes.position.setAttribute("cx", last.x.toFixed(1));
-  nodes.position.setAttribute("cy", last.y.toFixed(1));
-  nodes.position.setAttribute("r", (5 / scale).toFixed(1));
-  nodes.ring.setAttribute("cx", last.x.toFixed(1));
-  nodes.ring.setAttribute("cy", last.y.toFixed(1));
-  nodes.ring.setAttribute("r", (12 / scale).toFixed(1));
-
-  if (pixelPoints.length > 3) {
-    const first = pixelPoints[0];
-    nodes.start.setAttribute("cx", first.x.toFixed(1));
-    nodes.start.setAttribute("cy", first.y.toFixed(1));
-    nodes.start.setAttribute("r", (3.5 / scale).toFixed(1));
-  } else {
-    nodes.start.setAttribute("r", "0");
+  for (const [topic, pixelPoints] of grouped) {
+    const nodes = ensureTrajectoryTopicNodes(kind, layer, topic);
+    nodes.trail.setAttribute("points", pixelPoints.map((point) => `${point.x.toFixed(1)},${point.y.toFixed(1)}`).join(" "));
+    const last = pixelPoints[pixelPoints.length - 1];
+    nodes.position.setAttribute("cx", last.x.toFixed(1));
+    nodes.position.setAttribute("cy", last.y.toFixed(1));
+    nodes.position.setAttribute("r", (5 / scale).toFixed(1));
+    nodes.ring.setAttribute("cx", last.x.toFixed(1));
+    nodes.ring.setAttribute("cy", last.y.toFixed(1));
+    nodes.ring.setAttribute("r", (12 / scale).toFixed(1));
+    if (pixelPoints.length > 3) {
+      const first = pixelPoints[0];
+      nodes.start.setAttribute("cx", first.x.toFixed(1));
+      nodes.start.setAttribute("cy", first.y.toFixed(1));
+      nodes.start.setAttribute("r", (3.5 / scale).toFixed(1));
+    } else {
+      nodes.start.setAttribute("r", "0");
+    }
   }
+  for (const [topic, nodes] of trajectoryNodes[kind]) {
+    if (activeTopics.has(topic)) continue;
+    nodes.group.remove();
+    trajectoryNodes[kind].delete(topic);
+  }
+  renderTrajectoryLegend(kind, [...grouped.keys()]);
 }
 
 function handleMapSourceChanged(kind) {
@@ -1731,43 +1835,76 @@ async function startPublishing() {
   const payload = {
     ...buildRegionMessage(region),
     topic: elements.topicInput.value.trim() || "/selected_region",
-    rateHz: 1
+    rateHz: 50
   };
   try {
     const response = await postJson("/api/publish/start", payload);
-    state.publishingStatus = response.publishing || null;
-    state.publishing = Boolean(response.publishing?.active);
-    updatePublishUi(state.publishingStatus);
-    addLog(`开始发布: ${payload.flag} → ${payload.topic}`);
+    updatePublishUi(response.publications || []);
+    addLog(`添加发布: ${region.name} · ${payload.flag} → ${payload.topic}`);
   } catch (error) {
     addLog(`发布失败: ${error.message}`);
   }
 }
 
-async function stopPublishing() {
+async function stopPublishing(publicationId = "") {
   try {
-    await postJson("/api/publish/stop", {});
-    state.publishing = false;
-    state.publishingStatus = null;
-    updatePublishUi(null);
-    addLog("停止发布");
+    const response = await postJson("/api/publish/stop", publicationId ? { publicationId } : {});
+    updatePublishUi(response.publications || []);
+    addLog(publicationId ? "已停止一条区域发布任务" : "已停止全部区域发布任务");
   } catch (error) {
     addLog(`停止发布失败: ${error.message}`);
   }
 }
 
-function updatePublishUi(publishing = state.publishingStatus) {
-  const active = Boolean(publishing?.active ?? state.publishing);
-  const deliveryState = publishing?.deliveryState || (active ? "RUNNING" : "IDLE");
+function updatePublishUi(publications = state.publications) {
+  state.publications = Array.isArray(publications) ? publications : [];
+  const activePublications = state.publications.filter((publication) => publication.active);
+  const failedPublications = state.publications.filter((publication) => publication.deliveryState === "ERROR");
+  const active = activePublications.length > 0;
+  const deliveryState = failedPublications.length
+    ? `${failedPublications.length} ERROR`
+    : active
+      ? `${activePublications.length} ACTIVE`
+      : "IDLE";
   state.publishing = active;
-  state.publishingStatus = publishing;
   elements.publishState.classList.toggle("muted", !active);
-  elements.publishButton.disabled = active;
-  elements.stopButton.disabled = !active && deliveryState !== "ERROR";
+  elements.publishButton.disabled = false;
+  elements.stopButton.disabled = state.publications.length === 0;
   elements.publishStatus.textContent = deliveryState;
-  elements.publishStatus.style.color = deliveryState === "ERROR" ? "var(--red)" : active ? "var(--green)" : "";
-  elements.publishStatus.title = publishing?.lastError || "";
-  if (publishing?.lastError) addLog(`发布状态错误: ${publishing.lastError}`);
+  elements.publishStatus.style.color = failedPublications.length ? "var(--red)" : active ? "var(--green)" : "";
+  elements.publishStatus.title = failedPublications.map((publication) => publication.lastError).filter(Boolean).join("\n");
+  renderPublicationList();
+}
+
+function renderPublicationList() {
+  elements.publicationList.replaceChildren();
+  if (state.publications.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "publication-empty";
+    empty.textContent = "暂无发布任务";
+    elements.publicationList.append(empty);
+    return;
+  }
+  for (const publication of state.publications) {
+    const item = document.createElement("div");
+    const summary = document.createElement("div");
+    const name = document.createElement("strong");
+    const detail = document.createElement("small");
+    const stop = document.createElement("button");
+    item.className = `publication-item${publication.deliveryState === "ERROR" ? " error" : ""}`;
+    summary.className = "publication-summary";
+    name.textContent = `${publication.region?.name || "未命名区域"} · ${publication.deliveryState || "PENDING"}`;
+    detail.textContent = `${publication.flag} → ${publication.topic} · ${publication.rateHz} Hz`;
+    detail.title = detail.textContent;
+    stop.className = "publication-stop";
+    stop.type = "button";
+    stop.textContent = "停止";
+    stop.title = `停止 ${publication.region?.name || "区域"} 的发布`;
+    stop.addEventListener("click", () => stopPublishing(publication.id));
+    summary.append(name, detail);
+    item.append(summary, stop);
+    elements.publicationList.append(item);
+  }
 }
 
 async function toggleLocalization() {
@@ -1865,8 +2002,9 @@ function renderSystemStatus(system) {
   elements.rosNodeValue.title = ros.lastError || "";
   const trajectoryType = ros.trajectoryMessageType || "--";
   const regionType = ros.messageType || "--";
+  const trajectoryTopics = ros.topics?.globalposes || system.settings?.globalposeTopics || [primaryTrajectoryTopic()];
   elements.messageTypeValue.textContent = `${trajectoryType.split("/").pop()} + ${regionType.split("/").pop()}`;
-  elements.messageTypeValue.title = `轨迹: ${trajectoryType}\n区域: ${regionType}`;
+  elements.messageTypeValue.title = `轨迹: ${trajectoryType}\n话题: ${trajectoryTopics.join(", ")}\n区域: ${regionType}`;
   if (system.localization) updateLocalizationUi(system.localization);
 }
 
@@ -1884,7 +2022,7 @@ async function runAgent() {
     context: {
       telemetry: state.latestTelemetry,
       trajectory: state.telemetryHistory.slice(-30),
-      publishing: state.publishing,
+      publications: state.publications,
       flag: elements.flagSelect.value,
       topic: elements.topicInput.value
     }
@@ -1945,13 +2083,17 @@ function connectEvents() {
     eventSource.addEventListener("hello", (event) => {
       const data = JSON.parse(event.data);
       state.regions = Array.isArray(data.regions) ? data.regions : state.regions;
-      state.publishingStatus = data.publishing || null;
-      state.publishing = Boolean(data.publishing?.active);
+      state.publications = Array.isArray(data.publications)
+        ? data.publications
+        : data.publishing
+          ? [data.publishing]
+          : [];
+      state.publishing = state.publications.some((publication) => publication.active);
       state.localizationStatus = data.localization || null;
       state.localizationRunning = Boolean(data.localization?.active);
       renderRegionSelect();
       renderSavedRegions();
-      updatePublishUi(state.publishingStatus);
+      updatePublishUi(state.publications);
       updateLocalizationUi(state.localizationStatus);
       if (data.latestTelemetry) updateTelemetry(data.latestTelemetry);
       else if (data.latestTopic?.payload?.lat != null && data.latestTopic?.payload?.lon != null) {
@@ -1971,9 +2113,7 @@ function connectEvents() {
     });
     eventSource.addEventListener("publish-state", (event) => {
       const data = JSON.parse(event.data);
-      state.publishingStatus = data;
-      state.publishing = Boolean(data?.active);
-      updatePublishUi(data);
+      updatePublishUi(Array.isArray(data?.publications) ? data.publications : []);
     });
     eventSource.addEventListener("localization-state", (event) => {
       const data = JSON.parse(event.data);
@@ -1997,8 +2137,35 @@ function connectEvents() {
   connect();
 }
 
+function discardTelemetrySample(sample) {
+  trajectoryProjection.dom.pixels.delete(sample.id);
+  trajectoryProjection.dsm.pixels.delete(sample.id);
+  trajectoryProjection.dom.pending.delete(sample.id);
+  trajectoryProjection.dsm.pending.delete(sample.id);
+}
+
+function makeRoomForTrajectoryTopic(topic) {
+  const existingTopics = [...new Set(state.telemetryHistory.map((sample) => sample.topic))];
+  if (!existingTopics.includes(topic) && existingTopics.length >= MAX_TRAJECTORY_TOPICS) {
+    const oldestTopic = state.telemetryHistory[0]?.topic;
+    const retained = [];
+    for (const sample of state.telemetryHistory) {
+      if (sample.topic === oldestTopic) discardTelemetrySample(sample);
+      else retained.push(sample);
+    }
+    state.telemetryHistory = retained;
+  }
+  const topicSamples = state.telemetryHistory.filter((sample) => sample.topic === topic);
+  if (topicSamples.length < MAX_HISTORY) return;
+  const removeIndex = state.telemetryHistory.findIndex((sample) => sample.topic === topic);
+  if (removeIndex < 0) return;
+  const [removed] = state.telemetryHistory.splice(removeIndex, 1);
+  discardTelemetrySample(removed);
+}
+
 function updateTelemetry(data) {
   state.latestTelemetry = data;
+  const topic = data.topic || primaryTrajectoryTopic();
   const sample = {
     id: ++telemetrySequence,
     time: data.time || new Date().toISOString(),
@@ -2006,22 +2173,17 @@ function updateTelemetry(data) {
     lon: toFiniteNumber(data.lon),
     altitude: toFiniteNumber(data.altitude),
     heading: toFiniteNumber(data.heading),
-    speed: toFiniteNumber(data.speed)
+    speed: toFiniteNumber(data.speed),
+    topic
   };
   if (sample.lat !== null && sample.lon !== null && data.positionUpdate !== false) {
+    makeRoomForTrajectoryTopic(topic);
     state.telemetryHistory.push(sample);
-    if (state.telemetryHistory.length > MAX_HISTORY) {
-      const removed = state.telemetryHistory.shift();
-      trajectoryProjection.dom.pixels.delete(removed.id);
-      trajectoryProjection.dsm.pixels.delete(removed.id);
-      trajectoryProjection.dom.pending.delete(removed.id);
-      trajectoryProjection.dsm.pending.delete(removed.id);
-    }
     cacheTelemetryProjection("dom", sample);
     cacheTelemetryProjection("dsm", sample);
   }
 
-  if (data.positionUpdate !== false) elements.topicName.textContent = data.topic || "/self_state/globalpose";
+  if (data.positionUpdate !== false) elements.topicName.textContent = topic;
   elements.latValue.textContent = formatNumber(data.lat, 6);
   elements.lonValue.textContent = formatNumber(data.lon, 6);
   elements.altValue.textContent = `${formatNumber(data.altitude, 1)} m`;

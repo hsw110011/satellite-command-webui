@@ -31,6 +31,7 @@ except Exception as exc:  # pragma: no cover - depends on ROS installation
 
 FLAG_VALUES = {"GPS_FLAG": 0, "DR_FLAG": 1, "MATCH_FLAG": 2}
 ROS_NAME_PATTERN = re.compile(r"^/[A-Za-z][A-Za-z0-9_/]*$")
+MAX_REGION_PUBLISHERS = 32
 
 
 def _now() -> str:
@@ -53,6 +54,7 @@ class RosBridge:
         self._geo_point_class: Any = None
         self._message_type = "unavailable"
         self._trajectory_message_type = "unavailable"
+        self._trajectory_message_types: Dict[str, str] = {}
         self._globalpose_seen = False
         self._latest: Dict[str, Any] = {
             "lat": None,
@@ -113,7 +115,7 @@ class RosBridge:
                     self._message_class = RegionCommand
                     self._geo_point_class = GeoPoint
                     self._message_type = "skyforge_msgs/RegionCommand"
-                    self._trajectory_message_type = f"ROS AnyMsg ({self.settings.globalpose_topic})"
+                    self._trajectory_message_type = f"ROS AnyMsg ({len(self.settings.globalpose_topics)} topics)"
                 except Exception as exc:
                     if not self.settings.allow_string_fallback:
                         raise RuntimeError(
@@ -122,18 +124,22 @@ class RosBridge:
                     self._message_class = String
                     self._geo_point_class = None
                     self._message_type = "std_msgs/String (explicit fallback)"
-                    self._trajectory_message_type = f"ROS AnyMsg ({self.settings.globalpose_topic})"
+                    self._trajectory_message_type = f"ROS AnyMsg ({len(self.settings.globalpose_topics)} topics)"
 
                 subscribers = [
                     rospy.Subscriber(
-                        self.settings.globalpose_topic,
+                        topic,
                         rospy.AnyMsg,
                         self._on_globalpose_any,
+                        callback_args=topic,
                         queue_size=100,
-                    ),
+                    )
+                    for topic in self.settings.globalpose_topics
+                ]
+                subscribers.extend([
                     rospy.Subscriber(self.settings.fix_topic, NavSatFix, self._on_fix, queue_size=20),
                     rospy.Subscriber(self.settings.odom_topic, Odometry, self._on_odom, queue_size=50),
-                ]
+                ])
                 self._subscribers = subscribers
                 self._started = True
                 self._start_error = None
@@ -207,6 +213,7 @@ class RosBridge:
                 "topic": topic,
                 "messageType": self._message_type,
                 "trajectoryMessageType": self._trajectory_message_type,
+                "trajectoryMessageTypes": dict(self._trajectory_message_types),
                 "simulated": True,
                 "pointCount": len(coordinates),
                 "connections": 1,
@@ -215,8 +222,8 @@ class RosBridge:
         with self._lock:
             publisher = self._publishers.get(topic)
             if publisher is None:
-                # LRU: limit cached publishers to 5, unregister oldest
-                if len(self._publishers) >= 5:
+                # Bound publisher resources while allowing practical concurrent region topics.
+                if len(self._publishers) >= MAX_REGION_PUBLISHERS:
                     oldest_topic = next(iter(self._publishers))
                     old_pub = self._publishers.pop(oldest_topic)
                     try:
@@ -263,6 +270,7 @@ class RosBridge:
                 "topics": {
                     "fix": self.settings.fix_topic,
                     "globalpose": self.settings.globalpose_topic,
+                    "globalposes": list(self.settings.globalpose_topics),
                     "odom": self.settings.odom_topic,
                     "publishers": list(self._publishers.keys()),
                 },
@@ -341,7 +349,8 @@ class RosBridge:
             raise ValueError("Coordinate requires latitude and longitude")
         return {"latitude": float(latitude), "longitude": float(longitude)}
 
-    def _on_globalpose_any(self, raw_message: Any) -> None:
+    def _on_globalpose_any(self, raw_message: Any, source_topic: Optional[str] = None) -> None:
+        topic = source_topic or self.settings.globalpose_topic
         try:
             message_type = str(raw_message._connection_header.get("type", "")).strip()
             message_class = roslib.message.get_message_class(message_type)
@@ -350,14 +359,15 @@ class RosBridge:
             message = message_class()
             message.deserialize(raw_message._buff)
             with self._lock:
-                self._trajectory_message_type = message_type
+                self._trajectory_message_types[topic] = message_type
+                self._trajectory_message_type = message_type if len(self._trajectory_message_types) == 1 else "multiple ROS GlobalPose types"
                 self._start_error = None
-            self._on_globalpose(message)
+            self._on_globalpose(message, topic)
         except Exception as exc:
             with self._lock:
-                self._start_error = f"globalpose 解析失败: {exc}"
+                self._start_error = f"{topic} 解析失败: {exc}"
 
-    def _on_globalpose(self, message: Any) -> None:
+    def _on_globalpose(self, message: Any, source_topic: Optional[str] = None) -> None:
         latitude = self._message_number(message, "latitude")
         longitude = self._message_number(message, "longitude")
         altitude = self._message_number(message, "height", "altitude")
@@ -383,7 +393,7 @@ class RosBridge:
                     "speed": speed,
                 }
             )
-        self._emit_telemetry(self.settings.globalpose_topic, position_update=True)
+        self._emit_telemetry(source_topic or self.settings.globalpose_topic, position_update=True)
 
     def _on_fix(self, message: Any) -> None:
         with self._lock:

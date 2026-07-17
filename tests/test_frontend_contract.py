@@ -48,6 +48,35 @@ class FrontendContractTests(unittest.TestCase):
         self.assertIn("full.png?max_dim=2048", self.app_js)
         self.assertNotIn("will-change: transform;", self.styles)
 
+    def test_trajectory_and_regions_use_solid_high_visibility_styles(self) -> None:
+        self.assertIn("const REGION_PALETTE", self.app_js)
+        self.assertIn("color: visual.stroke", self.app_js)
+        self.assertIn('shape.setAttribute("class", selected ? "region-shape region-shape-selected"', self.app_js)
+        self.assertIn("vector-effect: non-scaling-stroke;", self.styles)
+        self.assertIn("--trajectory-color: #000;", self.styles)
+        self.assertIn("--trajectory-width: 50px;", self.styles)
+        self.assertIn('nodes.trail.style.strokeWidth = "var(--trajectory-width)";', self.app_js)
+        trajectory_block = self.styles.split(".vector-layer .trajectory-trail", 1)[1].split("}", 1)[0]
+        self.assertNotIn("stroke-dasharray", trajectory_block)
+
+    def test_multiple_globalpose_topics_render_as_independent_tracks(self) -> None:
+        self.assertIn("const trajectoryNodes = { dom: new Map(), dsm: new Map() };", self.app_js)
+        self.assertIn("const topic = sample.topic || primaryTrajectoryTopic();", self.app_js)
+        self.assertIn("if (!grouped.has(topic)) grouped.set(topic, []);", self.app_js)
+        self.assertIn("ensureTrajectoryTopicNodes(kind, layer, topic)", self.app_js)
+        self.assertIn('id="domTrajectoryLegend"', self.index_html)
+        self.assertIn('id="dsmTrajectoryLegend"', self.index_html)
+        self.assertIn(".trajectory-legend", self.styles)
+
+    def test_region_publications_can_be_managed_concurrently(self) -> None:
+        self.assertIn('id="publicationList"', self.index_html)
+        self.assertIn("state.publications", self.app_js)
+        self.assertIn("renderPublicationList()", self.app_js)
+        self.assertIn('stopPublishing(publication.id)', self.app_js)
+        self.assertIn(".publication-item", self.styles)
+        self.assertIn("rateHz: 50", self.app_js)
+        self.assertNotIn("elements.publishButton.disabled = active;", self.app_js)
+
 
 if __name__ == "__main__":
     unittest.main()
