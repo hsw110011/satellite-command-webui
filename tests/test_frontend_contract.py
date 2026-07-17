@@ -59,6 +59,19 @@ class FrontendContractTests(unittest.TestCase):
         trajectory_block = self.styles.split(".vector-layer .trajectory-trail", 1)[1].split("}", 1)[0]
         self.assertNotIn("stroke-dasharray", trajectory_block)
 
+    def test_rectangle_and_polygon_regions_share_visible_translucent_styles(self) -> None:
+        self.assertIn('fill: "rgba(83, 216, 251, 0.24)"', self.app_js)
+        self.assertIn('selectedFill: "rgba(83, 216, 251, 0.38)"', self.app_js)
+        self.assertIn('const polygon = document.createElementNS(SVG_NS, "polygon");', self.app_js)
+        self.assertIn('polygon.setAttribute("fill", visual.fill);', self.app_js)
+        self.assertIn("stroke-width: 3;", self.styles)
+
+    def test_online_imagery_source_is_removed(self) -> None:
+        self.assertNotIn('id="onlineButton"', self.index_html)
+        self.assertNotIn("ONLINE_TILE_SOURCE", self.app_js)
+        self.assertNotIn("renderOnlineTiles", self.app_js)
+        self.assertNotIn("arcgisonline.com", self.app_js)
+
     def test_multiple_globalpose_topics_render_as_independent_tracks(self) -> None:
         self.assertIn("const trajectoryNodes = { dom: new Map(), dsm: new Map() };", self.app_js)
         self.assertIn("const topic = sample.topic || primaryTrajectoryTopic();", self.app_js)

@@ -12,7 +12,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css?v=20260717.19" />
+    <link rel="stylesheet" href="./styles.css?v=20260717.20" />
   </head>
   <body>
     <div class="app-shell">
@@ -139,9 +139,6 @@
                   <button id="domFileButton" class="icon-button source-button" type="button" title="选择并上传 DOM TIFF 文件">
                     <span aria-hidden="true">▧</span><b>选择 TIFF</b>
                   </button>
-                  <button id="onlineButton" class="icon-button source-button" type="button" title="加载在线卫星瓦片">
-                    <span aria-hidden="true">◎</span><b>在线影像</b>
-                  </button>
                   <div class="map-zoom-control source-zoom" role="group" aria-label="DOM 缩放控制">
                     <button id="domZoomOutButton" type="button" title="缩小 DOM" aria-label="缩小 DOM">−</button>
                     <button id="domNativeButton" class="zoom-value" type="button" title="DOM 原始分辨率 1:1"><span id="domZoomValue">100%</span></button>
@@ -168,7 +165,7 @@
                 </div>
                 <input id="domFileInput" type="file" accept=".tif,.tiff,.geotiff" hidden />
               </div>
-              <div class="map-badge" aria-hidden="true"><span>WGS 84</span><b>DOM / LIVE</b></div>
+              <div class="map-badge" aria-hidden="true"><span>WGS 84</span><b>DOM / GEOTIFF</b></div>
               <div id="mapViewport" class="map-viewport">
                 <div id="mapContent" class="map-content">
                   <svg id="vectorLayer" class="vector-layer" xmlns="http://www.w3.org/2000/svg"></svg>
@@ -393,6 +390,6 @@
       </form>
     </dialog>
 
-    <script src="./app.js?v=20260717.19" type="module"></script>
+    <script src="./app.js?v=20260717.20" type="module"></script>
   </body>
 </html>

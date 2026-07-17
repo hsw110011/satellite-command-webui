@@ -4,7 +4,7 @@ const elements = {
   backendState: $("#backendState"), gatewayState: $("#gatewayState"), rosState: $("#rosState"),
   mapState: $("#mapState"), locState: $("#locState"), publishState: $("#publishState"),
   bridgeMode: $("#bridgeMode"), systemClock: $("#systemClock"),
-  domFileButton: $("#domFileButton"), onlineButton: $("#onlineButton"), domLocateButton: $("#domLocateButton"),
+  domFileButton: $("#domFileButton"), domLocateButton: $("#domLocateButton"),
   rectButton: $("#rectButton"), polygonButton: $("#polygonButton"), fitButton: $("#fitButton"),
   domZoomOutButton: $("#domZoomOutButton"), domNativeButton: $("#domNativeButton"), domZoomInButton: $("#domZoomInButton"),
   domZoomValue: $("#domZoomValue"), domExpandButton: $("#domExpandButton"),
@@ -47,14 +47,14 @@ const DEFAULT_CACHED_TILE_NODES = 192;
 const TILE_REFRESH_DELAY_MS = 150;
 const UI_PREFERENCES_KEY = "skyforge-ui-preferences-v1";
 const REGION_PALETTE = [
-  { stroke: "#53d8fb", fill: "rgba(83, 216, 251, 0.12)", selectedFill: "rgba(83, 216, 251, 0.22)" },
-  { stroke: "#ffc857", fill: "rgba(255, 200, 87, 0.12)", selectedFill: "rgba(255, 200, 87, 0.22)" },
-  { stroke: "#70e000", fill: "rgba(112, 224, 0, 0.11)", selectedFill: "rgba(112, 224, 0, 0.21)" },
-  { stroke: "#ff6b9e", fill: "rgba(255, 107, 158, 0.11)", selectedFill: "rgba(255, 107, 158, 0.21)" },
-  { stroke: "#ff8c42", fill: "rgba(255, 140, 66, 0.11)", selectedFill: "rgba(255, 140, 66, 0.21)" },
-  { stroke: "#45f0c1", fill: "rgba(69, 240, 193, 0.11)", selectedFill: "rgba(69, 240, 193, 0.21)" },
-  { stroke: "#b892ff", fill: "rgba(184, 146, 255, 0.11)", selectedFill: "rgba(184, 146, 255, 0.21)" },
-  { stroke: "#f25f5c", fill: "rgba(242, 95, 92, 0.11)", selectedFill: "rgba(242, 95, 92, 0.21)" }
+  { stroke: "#53d8fb", fill: "rgba(83, 216, 251, 0.24)", selectedFill: "rgba(83, 216, 251, 0.38)" },
+  { stroke: "#ffc857", fill: "rgba(255, 200, 87, 0.24)", selectedFill: "rgba(255, 200, 87, 0.38)" },
+  { stroke: "#70e000", fill: "rgba(112, 224, 0, 0.24)", selectedFill: "rgba(112, 224, 0, 0.38)" },
+  { stroke: "#ff6b9e", fill: "rgba(255, 107, 158, 0.24)", selectedFill: "rgba(255, 107, 158, 0.38)" },
+  { stroke: "#ff8c42", fill: "rgba(255, 140, 66, 0.24)", selectedFill: "rgba(255, 140, 66, 0.38)" },
+  { stroke: "#45f0c1", fill: "rgba(69, 240, 193, 0.24)", selectedFill: "rgba(69, 240, 193, 0.38)" },
+  { stroke: "#b892ff", fill: "rgba(184, 146, 255, 0.24)", selectedFill: "rgba(184, 146, 255, 0.38)" },
+  { stroke: "#f25f5c", fill: "rgba(242, 95, 92, 0.24)", selectedFill: "rgba(242, 95, 92, 0.38)" }
 ];
 const SECONDARY_TRAJECTORY_COLORS = [
   "#ff3b30", "#00d084", "#0066ff", "#ff9500", "#af52de", "#00bcd4", "#ff2d92"
@@ -62,11 +62,6 @@ const SECONDARY_TRAJECTORY_COLORS = [
 const MIN_MAP_SCALE = 0.0001;
 const MAX_MAP_SCALE = 32;
 const SVG_NS = "http://www.w3.org/2000/svg";
-const ONLINE_TILE_SOURCE = {
-  label: "Esri World Imagery", z: 15, centerX: 26979, centerY: 12416, radiusX: 3, radiusY: 2,
-  fingerprint: "online:esri-world-imagery:z15:26976-26982:12414-12418",
-  url: (z, x, y) => `https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`
-};
 const DEFAULT_BOUNDS = { north: 40.015, west: 116.315, south: 39.835, east: 116.505 };
 const createSource = (type = "demo") => ({
   type, fingerprint: `${type}:empty`, width: 1600, height: 1000, bounds: DEFAULT_BOUNDS,
@@ -133,7 +128,10 @@ async function init() {
   connectEvents();
   await Promise.all([loadRegions(), loadSystemStatus()]);
   const restoredMaps = await restorePersistedMaps();
-  if (!restoredMaps.dom) renderOnlineTiles();
+  if (!restoredMaps.dom) {
+    elements.domMapMeta.textContent = "IMAGERY · NOT LOADED";
+    elements.cursorReadout.textContent = "请选择 DOM TIFF";
+  }
   updateClock();
   window.setInterval(updateClock, 1000);
   requestAnimationFrame(() => {
@@ -149,7 +147,6 @@ function bindEvents() {
   on(elements.dsmFileButton, "click", () => elements.dsmFileInput?.click());
   on(elements.domFileInput, "change", (event) => handleTiffSelection("dom", event));
   on(elements.dsmFileInput, "change", (event) => handleTiffSelection("dsm", event));
-  on(elements.onlineButton, "click", renderOnlineTiles);
   on(elements.domLocateButton, "click", () => centerOnLatestPosition("dom"));
   on(elements.dsmLocateButton, "click", () => centerOnLatestPosition("dsm"));
   on(elements.fitButton, "click", () => fitView("dom"));
@@ -304,28 +301,6 @@ function cancelDraft() {
   state.selectionEl = null;
   renderVectorLayer("dom");
   renderVectorLayer("dsm");
-}
-
-function renderOnlineTiles() {
-  const tiles = [];
-  const { z, centerX, centerY, radiusX, radiusY } = ONLINE_TILE_SOURCE;
-  for (let y = centerY - radiusY; y <= centerY + radiusY; y += 1) {
-    for (let x = centerX - radiusX; x <= centerX + radiusX; x += 1) {
-      tiles.push({ z, x, y, url: ONLINE_TILE_SOURCE.url(z, x, y) });
-    }
-  }
-
-  renderTiles({
-    z,
-    tiles,
-    minX: centerX - radiusX,
-    maxX: centerX + radiusX,
-    minY: centerY - radiusY,
-    maxY: centerY + radiusY,
-    provider: ONLINE_TILE_SOURCE.label
-  });
-  setMapReady("在线影像加载中");
-  addLog(`加载在线瓦片: ${ONLINE_TILE_SOURCE.label}`);
 }
 
 function isTiffFile(file) {
@@ -834,64 +809,6 @@ function normalizeBounds(input) {
     south: Number(source.south ?? source.minLat),
     east: Number(source.east ?? source.maxLon ?? source.right)
   };
-}
-
-function renderTiles(tileSet) {
-  const width = (tileSet.maxX - tileSet.minX + 1) * TILE_SIZE;
-  const height = (tileSet.maxY - tileSet.minY + 1) * TILE_SIZE;
-  state.source = {
-    type: "tiles",
-    fingerprint: tileSet.fingerprint || ONLINE_TILE_SOURCE.fingerprint,
-    width,
-    height,
-    z: tileSet.z,
-    minX: tileSet.minX,
-    minY: tileSet.minY,
-    provider: tileSet.provider || "local",
-    bounds: null,
-    loaded: true
-  };
-  handleMapSourceChanged("dom");
-  if (elements.domMapMeta) {
-    elements.domMapMeta.textContent = tileSet.provider
-      ? `${tileSet.provider} · z${tileSet.z}`
-      : `LOCAL TILES · z${tileSet.z}`;
-  }
-
-  elements.mapContent.innerHTML = "";
-  elements.mapContent.dataset.sourceMode = "online";
-  elements.mapContent.style.width = `${width}px`;
-  elements.mapContent.style.height = `${height}px`;
-  let loaded = 0;
-  let failed = 0;
-  const updateTileStatus = () => {
-    const total = tileSet.tiles.length;
-    const label = tileSet.provider ? `${tileSet.provider}: ${loaded}/${total}` : `瓦片: ${loaded}/${total}`;
-    setMapReady(failed ? `${label}, failed ${failed}` : label);
-  };
-  for (const tile of tileSet.tiles) {
-    const img = document.createElement("img");
-    img.className = "tile-img";
-    img.loading = "lazy";
-    img.decoding = "async";
-    img.src = tile.url;
-    img.alt = "";
-    img.style.left = `${(tile.x - tileSet.minX) * TILE_SIZE}px`;
-    img.style.top = `${(tile.y - tileSet.minY) * TILE_SIZE}px`;
-    img.addEventListener("load", () => {
-      loaded += 1;
-      updateTileStatus();
-    });
-    img.addEventListener("error", () => {
-      failed += 1;
-      img.classList.add("tile-error");
-      updateTileStatus();
-    });
-    elements.mapContent.append(img);
-  }
-  ensureVectorLayer();
-  renderSavedRegions();
-  fitView();
 }
 
 function ensureVectorLayer() {
@@ -1497,11 +1414,12 @@ function renderVectorLayer(kind = "dom") {
   if (kind === "dom" && state.drawKind === "dom" && state.polygonPoints.length) {
     const preview = [...state.polygonPoints];
     if (state.polygonCursor) preview.push(state.polygonCursor);
-    const polygon = document.createElementNS(SVG_NS, "polyline");
+    const polygon = document.createElementNS(SVG_NS, "polygon");
     const visual = nextRegionVisual();
     polygon.setAttribute("points", preview.map((point) => `${point.x},${point.y}`).join(" "));
     polygon.setAttribute("class", "draft-poly");
     polygon.setAttribute("stroke", visual.stroke);
+    polygon.setAttribute("fill", visual.fill);
     layer.append(polygon);
     for (const point of state.polygonPoints) {
       const vertex = document.createElementNS(SVG_NS, "circle");

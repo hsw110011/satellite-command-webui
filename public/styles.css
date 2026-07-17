@@ -676,8 +676,8 @@ textarea:focus-visible {
   position: absolute;
   z-index: 6;
   box-sizing: border-box;
-  border: calc(2px * var(--map-inverse-scale, 1)) solid var(--region-stroke, var(--accent));
-  background: var(--region-fill, rgba(85, 184, 232, 0.12));
+  border: calc(3px * var(--map-inverse-scale, 1)) solid var(--region-stroke, var(--accent));
+  background: var(--region-fill, rgba(85, 184, 232, 0.24));
   box-shadow: none;
   pointer-events: none;
 }
@@ -702,7 +702,7 @@ textarea:focus-visible {
 }
 
 .vector-layer .region-shape {
-  stroke-width: 2;
+  stroke-width: 3;
   stroke-linecap: square;
   stroke-linejoin: miter;
   opacity: 1;
@@ -710,14 +710,13 @@ textarea:focus-visible {
 }
 
 .vector-layer .region-shape-selected {
-  stroke-width: 3;
+  stroke-width: 4;
 }
 
 .vector-layer .draft-poly {
-  fill: rgba(255, 255, 255, 0.06);
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+  stroke-width: 3;
+  stroke-linecap: square;
+  stroke-linejoin: miter;
   vector-effect: non-scaling-stroke;
 }
 
